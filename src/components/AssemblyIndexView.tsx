@@ -1,5 +1,5 @@
 import React from 'react';
-import { Trophy, Sparkles, Volume2, VolumeX, ShieldCheck, UserCheck, ArrowRight } from 'lucide-react';
+import { Trophy, Sparkles, Volume2, VolumeX, ShieldCheck, UserCheck, ArrowRight, ChevronDown } from 'lucide-react';
 import { useHousePoints } from '../context/HousePointsContext';
 import { SchoolTerm } from '../types';
 
@@ -46,21 +46,21 @@ export const AssemblyIndexView: React.FC = () => {
 
           {/* Controls: Term Selector & Teacher Portal Trigger */}
           <div className="flex items-center flex-wrap gap-2.5 sm:gap-3">
-            {/* Term Tabs */}
-            <div className="inline-flex items-center p-1 bg-neutral-900 border border-neutral-800 rounded-lg">
-              {terms.map((t) => (
-                <button
-                  key={t}
-                  onClick={() => setSelectedTerm(t)}
-                  className={`px-2.5 py-1 text-xs font-semibold rounded-md transition-all ${
-                    selectedTerm === t
-                      ? 'bg-neutral-800 text-white shadow-sm'
-                      : 'text-neutral-400 hover:text-neutral-200'
-                  }`}
-                >
-                  {t}
-                </button>
-              ))}
+            {/* Term Dropdown Selector */}
+            <div className="relative">
+              <select
+                value={selectedTerm}
+                onChange={(e) => setSelectedTerm(e.target.value as SchoolTerm)}
+                aria-label="Filter by School Term"
+                className="appearance-none bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-white font-semibold text-xs rounded-lg pl-3 pr-8 py-1.5 focus:outline-none focus:ring-1 focus:ring-red-600 focus:border-red-600 transition-colors cursor-pointer shadow-sm"
+              >
+                {terms.map((t) => (
+                  <option key={t} value={t} className="bg-neutral-900 text-neutral-100 py-1">
+                    {t}
+                  </option>
+                ))}
+              </select>
+              <ChevronDown className="w-3.5 h-3.5 text-neutral-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
             </div>
 
             {/* Confetti Quick Cheer */}

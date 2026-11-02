@@ -1,0 +1,502 @@
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
+import confetti from 'canvas-confetti';
+import { House, HouseId, PointEvent, TeacherUser, TeacherAccount, SchoolTerm, PointCategory } from '../types';
+import { INITIAL_HOUSES, INITIAL_POINT_EVENTS, INITIAL_AUTHORIZED_TEACHERS } from '../data/initialData';
+import { soundManager } from '../utils/audio';
+import {
+  signInWithGoogleSheets,
+  fetchTeachersFromSheet,
+  logoutGoogle,
+  getCachedAccessToken,
+  setCachedAccessToken,
+  SPREADSHEET_ID,
+  SHEET_TAB,
+  SHEET_URL,
+} from '../services/sheetsAuth';
+
+const STORAGE_EVENTS_KEY = 'gbhs_house_points_events_v3';
+const STORAGE_AUTH_KEY = 'gbhs_teacher_auth_v3';
+const STORAGE_SHEET_TEACHERS_KEY = 'gbhs_sheet_teachers_v3';
+
+export type AppView = 'assembly' | 'teacher-login' | 'teacher-portal';
+
+interface HousePointsContextType {
+  houses: House[];
+  rawHouses: Record<HouseId, House>;
+  events: PointEvent[];
+  filteredEvents: PointEvent[];
+  selectedTerm: SchoolTerm;
+  setSelectedTerm: (term: SchoolTerm) => void;
+  selectedCategory: PointCategory | 'All Categories';
+  setSelectedCategory: (cat: PointCategory | 'All Categories') => void;
+  teacherUser: TeacherUser | null;
+  authorizedTeachers: TeacherAccount[];
+  currentView: AppView;
+  setCurrentView: (view: AppView) => void;
+  signInWithGoogle: () => Promise<{ success: boolean; error?: string }>;
+  manualTeacherVerify: (email: string) => { success: boolean; error?: string };
+  logoutTeacher: () => void;
+  syncSheetTeachers: () => Promise<void>;
+  isSyncingSheet: boolean;
+  sheetSyncError: string | null;
+  sheetLastSynced: number | null;
+  addPoints: (data: Omit<PointEvent, 'id' | 'timestamp'>) => void;
+  deletePointEvent: (id: string) => void;
+  editPointEvent: (id: string, updated: Partial<PointEvent>) => void;
+  resetToDefaultData: () => void;
+  clearAllPoints: () => void;
+  exportLedgerCSV: () => void;
+  audioEnabled: boolean;
+  toggleAudio: () => void;
+  triggerConfetti: (colors?: string[]) => void;
+  currentLeader: House;
+}
+
+const HousePointsContext = createContext<HousePointsContextType | undefined>(undefined);
+
+export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  // Navigation View State
+  const [currentView, setCurrentView] = useState<AppView>('assembly');
+
+  // Load events
+  const [events, setEvents] = useState<PointEvent[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_EVENTS_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return INITIAL_POINT_EVENTS;
+  });
+
+  // Authorized teachers loaded from Google Sheet (TEACHERS_26 tab)
+  const [authorizedTeachers, setAuthorizedTeachers] = useState<TeacherAccount[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_SHEET_TEACHERS_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return INITIAL_AUTHORIZED_TEACHERS;
+  });
+
+  // Teacher user session
+  const [teacherUser, setTeacherUser] = useState<TeacherUser | null>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_AUTH_KEY);
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return null;
+  });
+
+  // Google Sheet Sync Status
+  const [isSyncingSheet, setIsSyncingSheet] = useState(false);
+  const [sheetSyncError, setSheetSyncError] = useState<string | null>(null);
+  const [sheetLastSynced, setSheetLastSynced] = useState<number | null>(null);
+
+  // Filters
+  const [selectedTerm, setSelectedTerm] = useState<SchoolTerm>('All Year');
+  const [selectedCategory, setSelectedCategory] = useState<PointCategory | 'All Categories'>('All Categories');
+  const [audioEnabled, setAudioEnabled] = useState<boolean>(soundManager.getEnabled());
+  const [prevLeaderId, setPrevLeaderId] = useState<HouseId | null>(null);
+
+  // Persist state
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_EVENTS_KEY, JSON.stringify(events));
+    } catch {}
+  }, [events]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_SHEET_TEACHERS_KEY, JSON.stringify(authorizedTeachers));
+    } catch {}
+  }, [authorizedTeachers]);
+
+  useEffect(() => {
+    try {
+      if (teacherUser) {
+        localStorage.setItem(STORAGE_AUTH_KEY, JSON.stringify(teacherUser));
+      } else {
+        localStorage.removeItem(STORAGE_AUTH_KEY);
+      }
+    } catch {}
+  }, [teacherUser]);
+
+  // Real-time broadcast sync across tabs
+  useEffect(() => {
+    let channel: BroadcastChannel | null = null;
+    try {
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        channel = new BroadcastChannel('gbhs_house_sync');
+        channel.onmessage = (msg) => {
+          if (msg.data?.type === 'UPDATE_EVENTS' && Array.isArray(msg.data.events)) {
+            setEvents(msg.data.events);
+          }
+        };
+      }
+    } catch {}
+
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key === STORAGE_EVENTS_KEY && e.newValue) {
+        try {
+          setEvents(JSON.parse(e.newValue));
+        } catch {}
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+
+    return () => {
+      window.removeEventListener('storage', handleStorageChange);
+      if (channel) channel.close();
+    };
+  }, []);
+
+  const broadcastEvents = (newEvents: PointEvent[]) => {
+    try {
+      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
+        const channel = new BroadcastChannel('gbhs_house_sync');
+        channel.postMessage({ type: 'UPDATE_EVENTS', events: newEvents });
+        channel.close();
+      }
+    } catch {}
+  };
+
+  // Filtered events
+  const filteredEvents = useMemo(() => {
+    return events.filter((ev) => {
+      const matchTerm = selectedTerm === 'All Year' || ev.term === selectedTerm;
+      const matchCategory = selectedCategory === 'All Categories' || ev.category === selectedCategory;
+      return matchTerm && matchCategory;
+    });
+  }, [events, selectedTerm, selectedCategory]);
+
+  // Compute houses with live totals
+  const computedHouses = useMemo(() => {
+    const totals: Record<HouseId, number> = {
+      tawhirimatea: 0,
+      tumatauenga: 0,
+      tangaroa: 0,
+      tanemahuta: 0,
+    };
+
+    filteredEvents.forEach((ev) => {
+      if (totals[ev.houseId] !== undefined) {
+        totals[ev.houseId] += ev.points;
+      }
+    });
+
+    const houseList: House[] = Object.keys(INITIAL_HOUSES).map((idKey) => {
+      const id = idKey as HouseId;
+      const base = INITIAL_HOUSES[id];
+      return {
+        ...base,
+        currentTotal: totals[id] || 0,
+        rank: 0,
+      };
+    });
+
+    houseList.sort((a, b) => b.currentTotal - a.currentTotal);
+
+    let currentRank = 1;
+    for (let i = 0; i < houseList.length; i++) {
+      if (i > 0 && houseList[i].currentTotal < houseList[i - 1].currentTotal) {
+        currentRank = i + 1;
+      }
+      houseList[i].rank = currentRank;
+    }
+
+    return houseList;
+  }, [filteredEvents]);
+
+  const rawHouses = useMemo(() => {
+    const map = {} as Record<HouseId, House>;
+    computedHouses.forEach((h) => {
+      map[h.id] = h;
+    });
+    return map;
+  }, [computedHouses]);
+
+  const currentLeader = computedHouses[0] || computedHouses[0];
+
+  // Confetti helper
+  const triggerConfetti = useCallback((colors?: string[]) => {
+    const houseColors = colors || ['#dc2626', '#eab308', '#84cc16', '#a2207e', '#ffffff'];
+    try {
+      confetti({
+        particleCount: 85,
+        spread: 80,
+        origin: { y: 0.55 },
+        colors: houseColors,
+      });
+    } catch {}
+  }, []);
+
+  // Leader celebration check
+  useEffect(() => {
+    if (computedHouses.length > 0) {
+      const leader = computedHouses[0];
+      if (prevLeaderId && prevLeaderId !== leader.id && leader.currentTotal > 0) {
+        triggerConfetti([leader.primaryColor, leader.secondaryColor, '#ffffff']);
+        soundManager.playLeadCelebration();
+      }
+      setPrevLeaderId(leader.id);
+    }
+  }, [computedHouses, prevLeaderId, triggerConfetti]);
+
+  // Sync teachers directly from Google Sheet (tab TEACHERS_26)
+  const syncSheetTeachers = async () => {
+    const token = getCachedAccessToken();
+    if (!token) return;
+
+    setIsSyncingSheet(true);
+    setSheetSyncError(null);
+
+    try {
+      const sheetTeachers = await fetchTeachersFromSheet(token);
+      if (sheetTeachers && sheetTeachers.length > 0) {
+        setAuthorizedTeachers(sheetTeachers);
+        setSheetLastSynced(Date.now());
+      }
+    } catch (err: any) {
+      console.warn('Sheet sync warning:', err);
+      setSheetSyncError(err?.message || 'Unable to sync spreadsheet rows.');
+    } finally {
+      setIsSyncingSheet(false);
+    }
+  };
+
+  /**
+   * Primary Teacher Google Login Flow:
+   * 1. Signs in via Google OAuth popup (requesting spreadsheets.readonly).
+   * 2. Reads the Google Sheet (1lzQe8aBQXxv615t8-cR_BfHHtbVHHkPxbix_dlS9b-Y, tab TEACHERS_26).
+   * 3. Verifies that the signed-in user's email exists on that Google Sheet!
+   * 4. Only allows access if the email is present on the Google Sheet.
+   */
+  const signInWithGoogle = async (): Promise<{ success: boolean; error?: string }> => {
+    setIsSyncingSheet(true);
+    setSheetSyncError(null);
+
+    try {
+      // 1. Google OAuth Sign-In Popup
+      const { user, accessToken } = await signInWithGoogleSheets();
+      const userEmail = (user.email || '').trim().toLowerCase();
+
+      // 2. Fetch latest teacher roster from Google Sheet (TEACHERS_26)
+      let teachersList = authorizedTeachers;
+      try {
+        const fetched = await fetchTeachersFromSheet(accessToken);
+        if (fetched && fetched.length > 0) {
+          teachersList = fetched;
+          setAuthorizedTeachers(fetched);
+          setSheetLastSynced(Date.now());
+        }
+      } catch (sheetErr: any) {
+        console.warn('Could not read sheet directly, falling back to cached roster:', sheetErr);
+        setSheetSyncError(sheetErr?.message || 'Could not fetch live sheet');
+      }
+
+      // 3. Check if user email is present on the Google Sheet
+      const matchedTeacher = teachersList.find(
+        (t) => t.email.toLowerCase() === userEmail
+      );
+
+      // Also allow user hermanf@gisboyshigh.net (app owner / dean)
+      const isOwner = userEmail === 'hermanf@gisboyshigh.net';
+
+      if (!matchedTeacher && !isOwner) {
+        // Sign out unauthorized user
+        await logoutGoogle();
+        return {
+          success: false,
+          error: `Access Denied: ${userEmail} is not listed on Google Sheet "TEACHERS_26". Only teachers with an email registered on that sheet are permitted to log in and add points.`,
+        };
+      }
+
+      const teacherName = matchedTeacher?.name || user.displayName || 'GBHS Teacher';
+      const teacherRole = matchedTeacher?.role || 'Staff & House Dean';
+
+      const authenticatedUser: TeacherUser = {
+        email: userEmail,
+        name: teacherName,
+        role: teacherRole,
+        picture: user.photoURL || undefined,
+        token: accessToken,
+        isTeacher: true,
+      };
+
+      setTeacherUser(authenticatedUser);
+      setCurrentView('teacher-portal');
+      soundManager.playClick();
+      return { success: true };
+    } catch (err: any) {
+      console.error('Google Sign-In failed:', err);
+      return {
+        success: false,
+        error: err?.message || 'Failed to sign in with Google.',
+      };
+    } finally {
+      setIsSyncingSheet(false);
+    }
+  };
+
+  /**
+   * Verified Teacher lookup from cached/synced Google Sheet:
+   * Used for direct verification or testing.
+   */
+  const manualTeacherVerify = (email: string) => {
+    const cleanEmail = email.trim().toLowerCase();
+
+    const matchedTeacher = authorizedTeachers.find(
+      (t) => t.email.toLowerCase() === cleanEmail
+    );
+    const isOwner = cleanEmail === 'hermanf@gisboyshigh.net';
+
+    if (!matchedTeacher && !isOwner) {
+      return {
+        success: false,
+        error: `Access Denied: ${cleanEmail} is not on the Google Sheet "TEACHERS_26". Only verified teachers listed on that spreadsheet can add points.`,
+      };
+    }
+
+    const name = matchedTeacher?.name || cleanEmail.split('@')[0].replace(/[._]/g, ' ');
+    const role = matchedTeacher?.role || 'GBHS Staff';
+
+    const user: TeacherUser = {
+      email: cleanEmail,
+      name,
+      role,
+      token: 'manual-token-' + Date.now(),
+      isTeacher: true,
+    };
+
+    setTeacherUser(user);
+    setCurrentView('teacher-portal');
+    soundManager.playClick();
+    return { success: true };
+  };
+
+  const logoutTeacher = async () => {
+    try {
+      await logoutGoogle();
+    } catch {}
+    setTeacherUser(null);
+    setCachedAccessToken(null);
+    setCurrentView('assembly');
+    soundManager.playClick();
+  };
+
+  const addPoints = (data: Omit<PointEvent, 'id' | 'timestamp'>) => {
+    const newEvent: PointEvent = {
+      ...data,
+      id: 'pe-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      timestamp: Date.now(),
+    };
+
+    const updated = [newEvent, ...events];
+    setEvents(updated);
+    broadcastEvents(updated);
+
+    soundManager.playPointAward(data.points);
+    const house = INITIAL_HOUSES[data.houseId];
+    if (house) {
+      triggerConfetti([house.primaryColor, house.secondaryColor, '#ffffff']);
+    }
+  };
+
+  const deletePointEvent = (id: string) => {
+    const updated = events.filter((e) => e.id !== id);
+    setEvents(updated);
+    broadcastEvents(updated);
+    soundManager.playClick();
+  };
+
+  const editPointEvent = (id: string, updatedFields: Partial<PointEvent>) => {
+    const updated = events.map((ev) => (ev.id === id ? { ...ev, ...updatedFields } : ev));
+    setEvents(updated);
+    broadcastEvents(updated);
+  };
+
+  const resetToDefaultData = () => {
+    setEvents(INITIAL_POINT_EVENTS);
+    broadcastEvents(INITIAL_POINT_EVENTS);
+    soundManager.playClick();
+  };
+
+  const clearAllPoints = () => {
+    setEvents([]);
+    broadcastEvents([]);
+    soundManager.playClick();
+  };
+
+  const exportLedgerCSV = () => {
+    const headers = ['ID', 'House', 'Points', 'Category', 'Term', 'Title', 'AwardedBy', 'Date', 'Notes'];
+    const rows = events.map((e) => [
+      e.id,
+      INITIAL_HOUSES[e.houseId]?.name || e.houseId,
+      e.points,
+      `"${e.category}"`,
+      e.term,
+      `"${e.title.replace(/"/g, '""')}"`,
+      `"${e.awardedBy}"`,
+      new Date(e.timestamp).toISOString(),
+      `"${(e.notes || '').replace(/"/g, '""')}"`,
+    ]);
+
+    const csvContent = 'data:text/csv;charset=utf-8,' + [headers.join(','), ...rows.map((r) => r.join(','))].join('\n');
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement('a');
+    link.setAttribute('href', encodedUri);
+    link.setAttribute('download', `GBHS_House_Points_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const toggleAudio = () => {
+    const next = !audioEnabled;
+    setAudioEnabled(next);
+    soundManager.setEnabled(next);
+    if (next) soundManager.playClick();
+  };
+
+  return (
+    <HousePointsContext.Provider
+      value={{
+        houses: computedHouses,
+        rawHouses,
+        events,
+        filteredEvents,
+        selectedTerm,
+        setSelectedTerm,
+        selectedCategory,
+        setSelectedCategory,
+        teacherUser,
+        authorizedTeachers,
+        currentView,
+        setCurrentView,
+        signInWithGoogle,
+        manualTeacherVerify,
+        logoutTeacher,
+        syncSheetTeachers,
+        isSyncingSheet,
+        sheetSyncError,
+        sheetLastSynced,
+        addPoints,
+        deletePointEvent,
+        editPointEvent,
+        resetToDefaultData,
+        clearAllPoints,
+        exportLedgerCSV,
+        audioEnabled,
+        toggleAudio,
+        triggerConfetti,
+        currentLeader,
+      }}
+    >
+      {children}
+    </HousePointsContext.Provider>
+  );
+};
+
+export const useHousePoints = () => {
+  const ctx = useContext(HousePointsContext);
+  if (!ctx) throw new Error('useHousePoints must be used within HousePointsProvider');
+  return ctx;
+};

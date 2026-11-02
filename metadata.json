@@ -1,0 +1,6 @@
+{
+  "name": "GBHS House Points Leaderboard",
+  "description": "Live animated house point tracker and teacher scoring portal for Gisborne Boys' High School, featuring Tāwhirimātea, Tūmatauenga, Tangaroa, and Tāne Mahuta.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

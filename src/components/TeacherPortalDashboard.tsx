@@ -1,0 +1,964 @@
+import React, { useState } from 'react';
+import {
+  ArrowLeft,
+  PlusCircle,
+  ListOrdered,
+  Layers,
+  UserCheck,
+  Settings,
+  LogOut,
+  Download,
+  Trash2,
+  CheckCircle,
+  Plus,
+  Search,
+  Sparkles,
+  AlertTriangle,
+  RotateCcw,
+  Shield,
+  FileSpreadsheet,
+  ExternalLink,
+  RefreshCw,
+} from 'lucide-react';
+import { useHousePoints } from '../context/HousePointsContext';
+import { HouseId, PointCategory, SchoolTerm } from '../types';
+import { SPREADSHEET_ID, SHEET_TAB, SHEET_URL } from '../services/sheetsAuth';
+
+export const TeacherPortalDashboard: React.FC = () => {
+  const {
+    teacherUser,
+    logoutTeacher,
+    setCurrentView,
+    houses,
+    rawHouses,
+    events,
+    addPoints,
+    deletePointEvent,
+    exportLedgerCSV,
+    authorizedTeachers,
+    syncSheetTeachers,
+    isSyncingSheet,
+    sheetSyncError,
+    sheetLastSynced,
+    resetToDefaultData,
+    clearAllPoints,
+    triggerConfetti,
+  } = useHousePoints();
+
+  // Active Tab
+  const [activeTab, setActiveTab] = useState<'award' | 'ledger' | 'houses' | 'teachers' | 'settings'>('award');
+
+  // Award Points Form State
+  const [selectedHouse, setSelectedHouse] = useState<HouseId>('tumatauenga');
+  const [pointsValue, setPointsValue] = useState<number>(50);
+  const [customPoints, setCustomPoints] = useState<string>('50');
+  const [eventTitle, setEventTitle] = useState('');
+  const [category, setCategory] = useState<PointCategory>('Sports & Athletics');
+  const [term, setTerm] = useState<'Term 1' | 'Term 2' | 'Term 3' | 'Term 4'>('Term 1');
+  const [notes, setNotes] = useState('');
+  const [submitSuccess, setSubmitSuccess] = useState(false);
+
+  // Ledger Filter & Search
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterCategory, setFilterCategory] = useState<string>('All');
+  const [filterHouse, setFilterHouse] = useState<string>('All');
+
+  // Selected house for detailed profile in "houses" tab
+  const [activeHouseProfile, setActiveHouseProfile] = useState<HouseId>('tumatauenga');
+
+  const quickEventTitles = [
+    'Inter-House Athletics 100m Sprint',
+    'Inter-House Swimming 50m Freestyle',
+    'Inter-House Haka Competition Award',
+    'Cross Country Senior Team Points',
+    'Academic Quiz & Science Bowl',
+    'Weekly Tutor Attendance & Merits',
+    'House Spirit & Tug-of-War Trophy',
+    'Debating & Public Speaking Round',
+  ];
+
+  const handlePointPreset = (val: number) => {
+    setPointsValue(val);
+    setCustomPoints(val.toString());
+  };
+
+  const handleCustomPointsChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setCustomPoints(e.target.value);
+    const parsed = parseInt(e.target.value, 10);
+    if (!isNaN(parsed)) setPointsValue(parsed);
+  };
+
+  const handleSubmitPoints = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!eventTitle.trim()) {
+      alert('Please enter an event or activity description.');
+      return;
+    }
+    if (pointsValue <= 0) {
+      alert('Points must be greater than 0.');
+      return;
+    }
+
+    addPoints({
+      houseId: selectedHouse,
+      points: pointsValue,
+      title: eventTitle.trim(),
+      category,
+      term,
+      awardedBy: teacherUser?.name || 'GBHS Staff',
+      notes: notes.trim() || undefined,
+    });
+
+    setSubmitSuccess(true);
+    setEventTitle('');
+    setNotes('');
+
+    setTimeout(() => {
+      setSubmitSuccess(false);
+    }, 2500);
+  };
+
+  // Filtered ledger events
+  const filteredEvents = events.filter((ev) => {
+    const matchesSearch =
+      ev.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      ev.awardedBy.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (ev.notes && ev.notes.toLowerCase().includes(searchQuery.toLowerCase()));
+    const matchesCat = filterCategory === 'All' || ev.category === filterCategory;
+    const matchesH = filterHouse === 'All' || ev.houseId === filterHouse;
+    return matchesSearch && matchesCat && matchesH;
+  });
+
+  return (
+    <div className="min-h-screen bg-[#07090e] text-neutral-100 flex flex-col justify-between">
+      {/* Top Staff Header */}
+      <header className="bg-neutral-950/95 border-b border-neutral-800/80 px-4 sm:px-8 py-3.5 sticky top-0 z-30 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+          {/* Brand & Return Link */}
+          <div className="flex items-center gap-4">
+            <button
+              onClick={() => setCurrentView('assembly')}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-xs font-semibold text-neutral-300 hover:text-white transition-colors"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back to Assembly Display</span>
+            </button>
+
+            <div className="flex items-center gap-2 pl-2 border-l border-neutral-800">
+              <span className="font-extrabold text-sm text-white font-display">
+                GBHS Teacher Scoring Portal
+              </span>
+              <span className="hidden sm:inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-red-950 text-red-300 border border-red-800/60 font-mono">
+                TEACHERS_26 Authorized
+              </span>
+            </div>
+          </div>
+
+          {/* Teacher Info & Sign Out */}
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2.5 bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-1.5">
+              <div className="w-7 h-7 rounded-full bg-red-800 text-white flex items-center justify-center font-bold text-xs uppercase shadow-sm">
+                {teacherUser?.name?.charAt(0) || 'T'}
+              </div>
+              <div className="text-left">
+                <div className="text-xs font-bold text-white leading-tight">
+                  {teacherUser?.name}
+                </div>
+                <div className="text-[10px] text-neutral-400 font-mono">
+                  {teacherUser?.email}
+                </div>
+              </div>
+            </div>
+
+            <button
+              onClick={logoutTeacher}
+              className="p-2 rounded-lg bg-neutral-900 hover:bg-red-950/60 border border-neutral-800 hover:border-red-800 text-neutral-400 hover:text-red-300 transition-colors"
+              title="Sign Out"
+            >
+              <LogOut className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </header>
+
+      {/* Main Teacher Content Area */}
+      <main className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 flex-1">
+        {/* Navigation Tabs */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-4 mb-6 border-b border-neutral-800 scrollbar-none">
+          <button
+            onClick={() => setActiveTab('award')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+              activeTab === 'award'
+                ? 'bg-red-700 text-white shadow-md shadow-red-950/40 border border-red-600'
+                : 'bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800 hover:border-neutral-700'
+            }`}
+          >
+            <PlusCircle className="w-3.5 h-3.5" />
+            <span>Award Points Desk</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('ledger')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+              activeTab === 'ledger'
+                ? 'bg-red-700 text-white shadow-md shadow-red-950/40 border border-red-600'
+                : 'bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800 hover:border-neutral-700'
+            }`}
+          >
+            <ListOrdered className="w-3.5 h-3.5" />
+            <span>Live Points Ledger ({events.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('houses')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+              activeTab === 'houses'
+                ? 'bg-red-700 text-white shadow-md shadow-red-950/40 border border-red-600'
+                : 'bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800 hover:border-neutral-700'
+            }`}
+          >
+            <Layers className="w-3.5 h-3.5" />
+            <span>House Profiles & Analytics</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('teachers')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+              activeTab === 'teachers'
+                ? 'bg-red-700 text-white shadow-md shadow-red-950/40 border border-red-600'
+                : 'bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800 hover:border-neutral-700'
+            }`}
+          >
+            <UserCheck className="w-3.5 h-3.5" />
+            <span>Google Sheet Roster ({authorizedTeachers.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('settings')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+              activeTab === 'settings'
+                ? 'bg-red-700 text-white shadow-md shadow-red-950/40 border border-red-600'
+                : 'bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800 hover:border-neutral-700'
+            }`}
+          >
+            <Settings className="w-3.5 h-3.5" />
+            <span>Competition Controls</span>
+          </button>
+        </div>
+
+        {/* TAB 1: AWARD POINTS DESK */}
+        {activeTab === 'award' && (
+          <div className="max-w-3xl mx-auto">
+            <div className="bg-neutral-900/80 border border-neutral-800 rounded-2xl p-6 sm:p-8 shadow-xl">
+              <div className="mb-6 pb-4 border-b border-neutral-800">
+                <h2 className="text-xl font-bold text-white font-display">
+                  Award House Competition Points
+                </h2>
+                <p className="text-xs text-neutral-400 mt-0.5">
+                  Points awarded here update the live Assembly Display instantly across all school screens.
+                </p>
+              </div>
+
+              {submitSuccess && (
+                <div className="mb-6 p-4 rounded-xl bg-emerald-950/80 border border-emerald-700 text-emerald-200 text-xs flex items-center gap-3 animate-fadeIn">
+                  <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0" />
+                  <div>
+                    <p className="font-bold">Points Successfully Logged!</p>
+                    <p className="text-emerald-300/90 mt-0.5">
+                      The live leaderboard and school hall screens have been updated.
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              <form onSubmit={handleSubmitPoints} className="space-y-6">
+                {/* 1. House Selector */}
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400 mb-2.5">
+                    1. Recipient School House
+                  </label>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                    {(Object.keys(rawHouses) as HouseId[]).map((id) => {
+                      const house = rawHouses[id];
+                      const isSelected = selectedHouse === id;
+                      return (
+                        <button
+                          key={id}
+                          type="button"
+                          onClick={() => setSelectedHouse(id)}
+                          className={`p-3 rounded-xl border flex flex-col items-center text-center transition-all ${
+                            isSelected
+                              ? 'bg-neutral-950 border-white ring-2 ring-red-600 scale-[1.02]'
+                              : 'bg-neutral-950/60 border-neutral-800 hover:border-neutral-700 opacity-80 hover:opacity-100'
+                          }`}
+                        >
+                          <div
+                            className="w-12 h-12 p-1 rounded-xl bg-neutral-900 border mb-2"
+                            style={{ borderColor: house.borderStroke }}
+                          >
+                            <img
+                              src={house.crest}
+                              alt={house.name}
+                              className="w-full h-full object-contain"
+                              onError={(e) => {
+                                const target = e.currentTarget;
+                                if (!target.src.includes('/public/')) {
+                                  target.src = '/public' + house.crest;
+                                }
+                              }}
+                            />
+                          </div>
+                          <span className="font-bold text-xs text-white font-display truncate w-full">
+                            {house.name}
+                          </span>
+                          <span className="text-[10px] text-neutral-400 truncate w-full">
+                            {house.colorName} · {house.currentTotal} pts
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* 2. Points Amount */}
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400 mb-2">
+                    2. Points Amount
+                  </label>
+                  <div className="flex flex-wrap items-center gap-2 mb-2">
+                    {[10, 25, 50, 75, 100, 150].map((val) => (
+                      <button
+                        key={val}
+                        type="button"
+                        onClick={() => handlePointPreset(val)}
+                        className={`px-3 py-1.5 text-xs font-bold font-mono rounded-lg border transition-colors ${
+                          pointsValue === val
+                            ? 'bg-red-700 text-white border-red-500'
+                            : 'bg-neutral-950 text-neutral-300 border-neutral-800 hover:border-neutral-700'
+                        }`}
+                      >
+                        +{val}
+                      </button>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-neutral-400">Custom points:</span>
+                    <input
+                      type="number"
+                      min="1"
+                      max="1000"
+                      value={customPoints}
+                      onChange={handleCustomPointsChange}
+                      className="w-28 bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-1.5 text-xs text-white font-mono font-bold focus:outline-none focus:border-red-600"
+                    />
+                    <span className="text-xs text-neutral-400">points</span>
+                  </div>
+                </div>
+
+                {/* 3. Category & Term */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400 mb-1.5">
+                      Competition Category
+                    </label>
+                    <select
+                      value={category}
+                      onChange={(e) => setCategory(e.target.value as PointCategory)}
+                      className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-red-600"
+                    >
+                      <option value="Sports & Athletics">Sports & Athletics</option>
+                      <option value="Academic & STEM">Academic & STEM</option>
+                      <option value="Kaupapa Māori & Haka">Kaupapa Māori & Haka</option>
+                      <option value="Arts & Cultural">Arts & Cultural</option>
+                      <option value="Attendance & Merits">Attendance & Merits</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400 mb-1.5">
+                      School Term
+                    </label>
+                    <select
+                      value={term}
+                      onChange={(e) => setTerm(e.target.value as any)}
+                      className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-red-600"
+                    >
+                      <option value="Term 1">Term 1</option>
+                      <option value="Term 2">Term 2</option>
+                      <option value="Term 3">Term 3</option>
+                      <option value="Term 4">Term 4</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* 4. Event Title & Quick Chips */}
+                <div>
+                  <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400 mb-1.5">
+                    Event / Achievement Reason
+                  </label>
+                  <input
+                    type="text"
+                    value={eventTitle}
+                    onChange={(e) => setEventTitle(e.target.value)}
+                    required
+                    placeholder="e.g. Senior 4x100m Athletics Relay (1st Place)"
+                    className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-red-600"
+                  />
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {quickEventTitles.map((title) => (
+                      <button
+                        key={title}
+                        type="button"
+                        onClick={() => setEventTitle(title)}
+                        className="text-[10px] px-2 py-0.5 rounded bg-neutral-950 text-neutral-400 hover:text-neutral-200 border border-neutral-800 hover:border-neutral-700 transition-colors"
+                      >
+                        + {title}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 5. Notes */}
+                <div>
+                  <label className="block text-xs font-semibold text-neutral-400 mb-1">
+                    Additional Notes / Details (Optional)
+                  </label>
+                  <input
+                    type="text"
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    placeholder="e.g. Record breaking performance by Year 11 squad"
+                    className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-3.5 py-2 text-xs text-white focus:outline-none focus:border-red-600"
+                  />
+                </div>
+
+                {/* Submit Button */}
+                <button
+                  type="submit"
+                  className="w-full py-3.5 px-4 bg-red-700 hover:bg-red-600 text-white rounded-xl text-sm font-bold flex items-center justify-center gap-2 shadow-lg shadow-red-950/50 transition-all"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>
+                    Award +{pointsValue} Points to {rawHouses[selectedHouse]?.name}
+                  </span>
+                </button>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 2: LIVE POINTS LEDGER */}
+        {activeTab === 'ledger' && (
+          <div className="space-y-6">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-bold text-white font-display">
+                  Official House Points Audit Ledger
+                </h2>
+                <p className="text-xs text-neutral-400 mt-0.5">
+                  Search, verify, and manage all competition records awarded by teachers.
+                </p>
+              </div>
+
+              <button
+                onClick={exportLedgerCSV}
+                className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-xs font-semibold text-neutral-200 transition-colors shrink-0"
+              >
+                <Download className="w-3.5 h-3.5 text-neutral-400" />
+                <span>Export Official CSV</span>
+              </button>
+            </div>
+
+            {/* Filter & Search Bar */}
+            <div className="bg-neutral-900/80 border border-neutral-800 rounded-xl p-3 sm:p-4 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-3">
+              <div className="relative flex-1">
+                <Search className="w-4 h-4 text-neutral-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  placeholder="Search event, athletics, swimming, haka, or teacher name..."
+                  className="w-full bg-neutral-950 border border-neutral-800 rounded-lg pl-9 pr-4 py-2 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-red-600"
+                />
+              </div>
+
+              <div className="flex items-center gap-2">
+                <select
+                  value={filterHouse}
+                  onChange={(e) => setFilterHouse(e.target.value)}
+                  className="bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-xs text-neutral-300 focus:outline-none focus:border-red-600"
+                >
+                  <option value="All">All Houses</option>
+                  <option value="tawhirimatea">Tāwhirimātea (Purple)</option>
+                  <option value="tumatauenga">Tūmatauenga (Red)</option>
+                  <option value="tangaroa">Tangaroa (Yellow)</option>
+                  <option value="tanemahuta">Tāne Mahuta (Green)</option>
+                </select>
+
+                <select
+                  value={filterCategory}
+                  onChange={(e) => setFilterCategory(e.target.value)}
+                  className="bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-xs text-neutral-300 focus:outline-none focus:border-red-600"
+                >
+                  <option value="All">All Categories</option>
+                  <option value="Sports & Athletics">Sports & Athletics</option>
+                  <option value="Academic & STEM">Academic & STEM</option>
+                  <option value="Kaupapa Māori & Haka">Kaupapa Māori & Haka</option>
+                  <option value="Arts & Cultural">Arts & Cultural</option>
+                  <option value="Attendance & Merits">Attendance & Merits</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Event List */}
+            <div className="bg-neutral-900/60 border border-neutral-800 rounded-2xl overflow-hidden divide-y divide-neutral-800/80">
+              {filteredEvents.length === 0 ? (
+                <div className="p-12 text-center text-xs text-neutral-500">
+                  No records match your current filters.
+                </div>
+              ) : (
+                filteredEvents.map((ev) => {
+                  const house = rawHouses[ev.houseId];
+                  return (
+                    <div
+                      key={ev.id}
+                      className="p-4 sm:p-5 hover:bg-neutral-800/30 transition-colors flex flex-col sm:flex-row sm:items-center justify-between gap-4"
+                    >
+                      <div className="flex items-center gap-3.5">
+                        <div
+                          className="w-11 h-11 p-1 rounded-xl bg-neutral-950 border shrink-0"
+                          style={{ borderColor: house?.borderStroke }}
+                        >
+                          <img
+                            src={house?.crest}
+                            alt={house?.name}
+                            className="w-full h-full object-contain"
+                            onError={(e) => {
+                              const target = e.currentTarget;
+                              if (!target.src.includes('/public/')) {
+                                target.src = '/public' + house?.crest;
+                              }
+                            }}
+                          />
+                        </div>
+
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                            <span
+                              className="text-xs font-bold font-display"
+                              style={{ color: house?.primaryColor }}
+                            >
+                              {house?.name}
+                            </span>
+                            <span className="text-neutral-600 text-xs">·</span>
+                            <span className="text-xs text-neutral-400 font-medium">
+                              {ev.category}
+                            </span>
+                            <span className="text-neutral-600 text-xs">·</span>
+                            <span className="text-xs text-neutral-400">{ev.term}</span>
+                          </div>
+
+                          <h4 className="text-sm sm:text-base font-semibold text-white leading-snug">
+                            {ev.title}
+                          </h4>
+
+                          {ev.notes && (
+                            <p className="text-xs text-neutral-400 mt-0.5 italic">{ev.notes}</p>
+                          )}
+
+                          <div className="text-[11px] text-neutral-400 mt-1">
+                            Logged by {ev.awardedBy} ·{' '}
+                            {new Date(ev.timestamp).toLocaleDateString('en-NZ', {
+                              month: 'short',
+                              day: 'numeric',
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3 self-end sm:self-center shrink-0">
+                        <span
+                          className="px-3 py-1 rounded-lg border font-mono font-bold text-sm"
+                          style={{
+                            backgroundColor: `${house?.primaryColor}15`,
+                            color: house?.borderStroke,
+                            borderColor: `${house?.borderStroke}50`,
+                          }}
+                        >
+                          +{ev.points} pts
+                        </span>
+
+                        <button
+                          onClick={() => {
+                            if (window.confirm(`Delete entry "${ev.title}"?`)) {
+                              deletePointEvent(ev.id);
+                            }
+                          }}
+                          className="p-1.5 text-neutral-500 hover:text-red-400 hover:bg-neutral-800 rounded-lg transition-colors"
+                          title="Delete entry"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 3: HOUSE PROFILES & ANALYTICS */}
+        {activeTab === 'houses' && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Left Column: 4 Houses Selector */}
+            <div className="space-y-3">
+              <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400 mb-2">
+                Select House
+              </h3>
+              {houses.map((house) => {
+                const isSelected = activeHouseProfile === house.id;
+                return (
+                  <button
+                    key={house.id}
+                    onClick={() => setActiveHouseProfile(house.id)}
+                    className={`w-full p-3.5 rounded-2xl border text-left flex items-center justify-between transition-all ${
+                      isSelected
+                        ? 'bg-neutral-900 border-white ring-1 ring-red-600'
+                        : 'bg-neutral-950/70 border-neutral-800 hover:border-neutral-700'
+                    }`}
+                  >
+                    <div className="flex items-center gap-3">
+                      <div
+                        className="w-11 h-11 p-1 rounded-xl bg-neutral-900 border shrink-0"
+                        style={{ borderColor: house.borderStroke }}
+                      >
+                        <img
+                          src={house.crest}
+                          alt={house.name}
+                          className="w-full h-full object-contain"
+                        />
+                      </div>
+                      <div>
+                        <div className="font-bold text-sm text-white font-display">
+                          {house.name}
+                        </div>
+                        <div className="text-xs text-neutral-400">
+                          {house.colorName} · Rank #{house.rank}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="text-right">
+                      <span className="text-base font-black text-white font-mono tabular-nums">
+                        {house.currentTotal.toLocaleString()}
+                      </span>
+                      <span className="text-[10px] text-neutral-400 block">points</span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Right Column: Detailed Analytics for Selected House */}
+            <div className="lg:col-span-2 bg-neutral-900/80 border border-neutral-800 rounded-2xl p-6 sm:p-8 space-y-6">
+              {(() => {
+                const house = rawHouses[activeHouseProfile];
+                const houseEvents = events.filter((e) => e.houseId === house.id);
+                const categoryBreakdown: Record<string, number> = {};
+                houseEvents.forEach((ev) => {
+                  categoryBreakdown[ev.category] = (categoryBreakdown[ev.category] || 0) + ev.points;
+                });
+
+                return (
+                  <>
+                    <div className="flex items-start justify-between gap-4 pb-4 border-b border-neutral-800">
+                      <div className="flex items-center gap-4">
+                        <div
+                          className="w-16 h-16 p-1.5 rounded-2xl bg-neutral-950 border-2 shrink-0 shadow-lg"
+                          style={{ borderColor: house.borderStroke }}
+                        >
+                          <img
+                            src={house.crest}
+                            alt={house.name}
+                            className="w-full h-full object-contain"
+                          />
+                        </div>
+                        <div>
+                          <div className="text-xs font-bold uppercase tracking-wider text-neutral-400">
+                            {house.colorName} House · Rank #{house.rank}
+                          </div>
+                          <h2 className="text-2xl font-black text-white font-display">
+                            {house.name}
+                          </h2>
+                          <p className="text-xs text-neutral-400 mt-0.5">{house.patron}</p>
+                        </div>
+                      </div>
+
+                      <div className="text-right">
+                        <span className="text-3xl font-black text-white font-mono tabular-nums">
+                          {house.currentTotal.toLocaleString()}
+                        </span>
+                        <span className="text-xs text-neutral-400 block font-medium">total points</span>
+                      </div>
+                    </div>
+
+                    {/* Cultural Background */}
+                    <div>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-400 mb-1.5">
+                        Cultural Meaning & Patron Atua
+                      </h4>
+                      <p className="text-xs sm:text-sm text-neutral-300 leading-relaxed bg-neutral-950/60 p-3.5 rounded-xl border border-neutral-800/80">
+                        {house.meaning}
+                      </p>
+                      <p className="text-xs text-neutral-400 italic mt-1.5">
+                        Motto: "{house.motto}"
+                      </p>
+                    </div>
+
+                    {/* Category Breakdown */}
+                    <div>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-400 mb-3">
+                        Points Distribution by Category
+                      </h4>
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+                        {[
+                          'Sports & Athletics',
+                          'Academic & STEM',
+                          'Kaupapa Māori & Haka',
+                          'Arts & Cultural',
+                          'Attendance & Merits',
+                        ].map((cat) => {
+                          const val = categoryBreakdown[cat] || 0;
+                          return (
+                            <div
+                              key={cat}
+                              className="p-3 rounded-xl bg-neutral-950 border border-neutral-800"
+                            >
+                              <span className="text-[11px] text-neutral-400 truncate block mb-1">
+                                {cat}
+                              </span>
+                              <span className="text-lg font-bold text-white font-mono tabular-nums">
+                                {val.toLocaleString()}{' '}
+                                <span className="text-xs font-normal text-neutral-400">pts</span>
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Recent 5 victories for this house */}
+                    <div>
+                      <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-400 mb-2">
+                        Recent Logged Events ({houseEvents.length})
+                      </h4>
+                      <div className="space-y-1.5 max-h-48 overflow-y-auto">
+                        {houseEvents.slice(0, 5).map((e) => (
+                          <div
+                            key={e.id}
+                            className="p-2.5 rounded-lg bg-neutral-950/60 border border-neutral-800/60 flex items-center justify-between text-xs"
+                          >
+                            <span className="text-neutral-200 truncate pr-2">{e.title}</span>
+                            <span className="font-mono font-bold text-amber-400 shrink-0">
+                              +{e.points} pts
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          </div>
+        )}
+
+        {/* TAB 4: GOOGLE SHEET ROSTER (TEACHERS_26) */}
+        {activeTab === 'teachers' && (
+          <div className="max-w-3xl mx-auto space-y-6">
+            <div className="bg-neutral-900/80 border border-neutral-800 rounded-2xl p-6 sm:p-8">
+              <div className="mb-6 pb-4 border-b border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
+                      <FileSpreadsheet className="w-3.5 h-3.5" />
+                      Google Sheet Integration
+                    </span>
+                  </div>
+                  <h2 className="text-xl font-bold text-white font-display">
+                    Authorized Teachers Roster ({SHEET_TAB})
+                  </h2>
+                  <p className="text-xs text-neutral-400 mt-0.5">
+                    Only staff with an email listed in this Google Sheet can log in to award house points.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <a
+                    href={SHEET_URL}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-neutral-950 hover:bg-neutral-800 border border-neutral-800 text-xs text-neutral-300 hover:text-white transition-colors"
+                  >
+                    <span>Open Sheet</span>
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+
+                  <button
+                    onClick={syncSheetTeachers}
+                    disabled={isSyncingSheet}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-red-700 hover:bg-red-600 text-white text-xs font-bold transition-colors shadow-sm"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncingSheet ? 'animate-spin' : ''}`} />
+                    <span>Sync from Sheet</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Sheet Metadata Box */}
+              <div className="mb-6 p-4 rounded-xl bg-neutral-950 border border-neutral-800 text-xs space-y-2">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-neutral-400">
+                  <span>
+                    Spreadsheet ID: <code className="text-neutral-200 font-mono">{SPREADSHEET_ID}</code>
+                  </span>
+                  <span>
+                    Tab Name: <code className="text-emerald-400 font-mono font-bold">{SHEET_TAB}</code>
+                  </span>
+                </div>
+                {sheetLastSynced && (
+                  <p className="text-[11px] text-neutral-500">
+                    Last synchronized from Google Sheets: {new Date(sheetLastSynced).toLocaleTimeString()}
+                  </p>
+                )}
+                {sheetSyncError && (
+                  <p className="text-[11px] text-amber-400 bg-amber-950/40 p-2 rounded border border-amber-800/40">
+                    Sync notice: {sheetSyncError}
+                  </p>
+                )}
+              </div>
+
+              {/* Current Teacher List */}
+              <div className="space-y-2">
+                <span className="text-xs font-bold uppercase tracking-wider text-neutral-400 block mb-2">
+                  Teachers on Sheet ({authorizedTeachers.length})
+                </span>
+
+                {authorizedTeachers.map((t) => (
+                  <div
+                    key={t.email}
+                    className="p-3.5 rounded-xl bg-neutral-950 border border-neutral-800 flex items-center justify-between gap-4"
+                  >
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-full bg-red-900/60 text-red-300 border border-red-700/50 flex items-center justify-center font-bold text-xs">
+                        {t.name.charAt(0)}
+                      </div>
+                      <div>
+                        <div className="text-xs font-bold text-white flex items-center gap-2">
+                          <span>{t.name}</span>
+                          {t.isSuperAdmin && (
+                            <span className="px-1.5 py-0.2 rounded text-[10px] bg-red-950 text-red-300 border border-red-800">
+                              Admin
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[11px] text-neutral-400 font-mono">{t.email}</div>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <span className="text-[11px] text-neutral-400 hidden sm:inline">{t.role}</span>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800/60">
+                        Authorized
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* TAB 5: COMPETITION CONTROLS */}
+        {activeTab === 'settings' && (
+          <div className="max-w-2xl mx-auto space-y-6">
+            <div className="bg-neutral-900/80 border border-neutral-800 rounded-2xl p-6 sm:p-8">
+              <div className="mb-6 pb-4 border-b border-neutral-800">
+                <h2 className="text-xl font-bold text-white font-display">
+                  Competition Administration & Controls
+                </h2>
+                <p className="text-xs text-neutral-400 mt-0.5">
+                  Manage school competition datasets, terms, and fresh starts.
+                </p>
+              </div>
+
+              <div className="space-y-4">
+                <div className="p-4 rounded-xl bg-neutral-950 border border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h4 className="font-bold text-sm text-white">Reset to Sample GBHS Dataset</h4>
+                    <p className="text-xs text-neutral-400 mt-0.5">
+                      Restores initial sample data for Athletics Day, Swimming Sports, and Haka.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (window.confirm('Reset to default competition sample records?')) {
+                        resetToDefaultData();
+                      }
+                    }}
+                    className="px-3.5 py-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-xs font-semibold text-neutral-200 transition-colors flex items-center justify-center gap-1.5 shrink-0"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5 text-neutral-400" />
+                    <span>Reset Data</span>
+                  </button>
+                </div>
+
+                <div className="p-4 rounded-xl bg-neutral-950 border border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h4 className="font-bold text-sm text-white">Export Official Ledger (CSV)</h4>
+                    <p className="text-xs text-neutral-400 mt-0.5">
+                      Download full spreadsheet archive with timestamps, teachers, and notes.
+                    </p>
+                  </div>
+                  <button
+                    onClick={exportLedgerCSV}
+                    className="px-3.5 py-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-xs font-semibold text-neutral-200 transition-colors flex items-center justify-center gap-1.5 shrink-0"
+                  >
+                    <Download className="w-3.5 h-3.5 text-neutral-400" />
+                    <span>Export CSV</span>
+                  </button>
+                </div>
+
+                <div className="p-4 rounded-xl bg-red-950/20 border border-red-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div>
+                    <h4 className="font-bold text-sm text-red-200">Start Fresh Competition Term (0 pts)</h4>
+                    <p className="text-xs text-red-300/80 mt-0.5">
+                      Clears all points for all 4 houses to start a brand new term or school year.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          'Are you sure you want to clear all points? All 4 houses will be set to 0. (You can download a CSV backup first)'
+                        )
+                      ) {
+                        clearAllPoints();
+                      }
+                    }}
+                    className="px-3.5 py-2 rounded-lg bg-red-950 hover:bg-red-900 border border-red-800 text-xs font-bold text-red-200 transition-colors flex items-center justify-center gap-1.5 shrink-0"
+                  >
+                    <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
+                    <span>Clear All Points</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+      </main>
+    </div>
+  );
+};

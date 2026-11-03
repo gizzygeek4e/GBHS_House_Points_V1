@@ -1,13 +1,10 @@
-import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
-  getAuth,
   signInWithPopup,
   GoogleAuthProvider,
   signOut,
-  onAuthStateChanged,
   User,
 } from 'firebase/auth';
-import firebaseConfig from '../../firebase-applet-config.json';
+import { auth } from './firebase';
 import { TeacherAccount } from '../types';
 
 export const SPREADSHEET_ID = '1lzQe8aBQXxv615t8-cR_BfHHtbVHHkPxbix_dlS9b-Y';
@@ -16,13 +13,17 @@ export const SHEET_URL = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_I
 
 export const SCOPES = ['https://www.googleapis.com/auth/spreadsheets.readonly'];
 
-// Initialize Firebase App
-const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+// Standard Google Auth Provider (Requests identity profile + email without sensitive scopes)
+// This prevents Google Workspace domain admin policy blocks for @gisboyshigh.net accounts.
+const standardProvider = new GoogleAuthProvider();
+standardProvider.setCustomParameters({
+  prompt: 'select_account',
+});
 
-const provider = new GoogleAuthProvider();
-provider.addScope('https://www.googleapis.com/auth/spreadsheets.readonly');
-provider.setCustomParameters({
+// Optional provider that includes Google Sheets scope when live sheet sync is requested
+const sheetsProvider = new GoogleAuthProvider();
+sheetsProvider.addScope('https://www.googleapis.com/auth/spreadsheets.readonly');
+sheetsProvider.setCustomParameters({
   prompt: 'select_account',
 });
 
@@ -35,22 +36,24 @@ export const setCachedAccessToken = (token: string | null) => {
 };
 
 /**
- * Initiates Google Sign-In with Sheets scope.
+ * Initiates standard Google Sign-In with popup.
+ * Extracts the authenticated Google account email (for Column C verification).
+ * If an OAuth access token is present, caches it for optional sheet requests.
  */
-export const signInWithGoogleSheets = async (): Promise<{
+export const signInWithGoogleAccount = async (requestSheetsScope = false): Promise<{
   user: User;
-  accessToken: string;
+  accessToken?: string;
 }> => {
   try {
-    const result = await signInWithPopup(auth, provider);
+    const providerToUse = requestSheetsScope ? sheetsProvider : standardProvider;
+    const result = await signInWithPopup(auth, providerToUse);
     const credential = GoogleAuthProvider.credentialFromResult(result);
-    const token = credential?.accessToken;
+    const token = credential?.accessToken || undefined;
 
-    if (!token) {
-      throw new Error('Failed to acquire Google OAuth access token for Google Sheets.');
+    if (token) {
+      cachedAccessToken = token;
     }
 
-    cachedAccessToken = token;
     return {
       user: result.user,
       accessToken: token,
@@ -68,7 +71,7 @@ export const logoutGoogle = async () => {
 
 /**
  * Parses raw 2D array of rows from Google Sheets into structured TeacherAccount items.
- * Per GBHS specification: Column C (index 2) contains the verified Google account emails.
+ * Per GBHS specification: Column C (index 2) contains verified Google account emails.
  * Column A (index 0) contains staff names.
  * Column B (index 1) contains staff roles / houses.
  */
@@ -140,6 +143,25 @@ export const parseTeacherRows = (rows: any[][]): TeacherAccount[] => {
   }
 
   return teachers;
+};
+
+/**
+ * Parses raw pasted CSV or tab-delimited text from Google Sheets TEACHERS_26 tab.
+ */
+export const parseTeacherCsv = (csvText: string): TeacherAccount[] => {
+  if (!csvText || !csvText.trim()) return [];
+
+  const lines = csvText.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const rows = lines.map((line) => {
+    // Split by tab or comma (handling quotes)
+    if (line.includes('\t')) {
+      return line.split('\t').map((c) => c.replace(/^["']|["']$/g, '').trim());
+    }
+    // simple CSV split
+    return line.split(',').map((c) => c.replace(/^["']|["']$/g, '').trim());
+  });
+
+  return parseTeacherRows(rows);
 };
 
 /**

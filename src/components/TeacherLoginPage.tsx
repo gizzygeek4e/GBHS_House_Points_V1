@@ -1,5 +1,17 @@
 import React, { useState } from 'react';
-import { ArrowLeft, ShieldAlert, CheckCircle2, Lock, ExternalLink, RefreshCw, FileSpreadsheet, KeyRound } from 'lucide-react';
+import {
+  ArrowLeft,
+  ShieldAlert,
+  CheckCircle2,
+  Lock,
+  ExternalLink,
+  RefreshCw,
+  FileSpreadsheet,
+  KeyRound,
+  Info,
+  Globe,
+  UserCheck,
+} from 'lucide-react';
 import { useHousePoints } from '../context/HousePointsContext';
 import { SPREADSHEET_ID, SHEET_TAB, SHEET_URL } from '../services/sheetsAuth';
 
@@ -9,12 +21,14 @@ export const TeacherLoginPage: React.FC = () => {
     signInWithGoogle,
     isSyncingSheet,
     sheetSyncError,
+    authorizedTeachers,
   } = useHousePoints();
 
   const [errorMessage, setErrorMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
 
-  // Trigger Genuine Google Sign-In with Sheets scope
+  // Trigger Genuine Google Sign-In
   const handleGoogleAuth = async () => {
     setIsLoading(true);
     setErrorMessage('');
@@ -30,16 +44,27 @@ export const TeacherLoginPage: React.FC = () => {
     }
   };
 
+  const currentHost = typeof window !== 'undefined' ? window.location.hostname : '';
+  const isUnauthorizedDomain = errorMessage.includes('Domain Authorization Required') || errorMessage.includes('auth/unauthorized-domain');
+
   return (
     <div className="min-h-screen bg-[#07090e] text-neutral-100 flex flex-col justify-center p-4 sm:p-8">
       {/* Top Bar with Back Link */}
-      <div className="max-w-md mx-auto w-full mb-4">
+      <div className="max-w-md mx-auto w-full mb-4 flex items-center justify-between">
         <button
           onClick={() => setCurrentView('assembly')}
-          className="inline-flex items-center gap-2 text-xs font-semibold text-neutral-400 hover:text-white transition-colors"
+          className="inline-flex items-center gap-2 text-xs font-semibold text-neutral-400 hover:text-white transition-colors cursor-pointer"
         >
           <ArrowLeft className="w-4 h-4" />
           <span>Return to Assembly Leaderboard</span>
+        </button>
+
+        <button
+          onClick={() => setShowDiagnostics((prev) => !prev)}
+          className="text-[11px] text-neutral-500 hover:text-neutral-300 flex items-center gap-1 transition-colors cursor-pointer"
+        >
+          <Info className="w-3.5 h-3.5" />
+          <span>{showDiagnostics ? 'Hide Info' : 'Diagnostics'}</span>
         </button>
       </div>
 
@@ -87,32 +112,59 @@ export const TeacherLoginPage: React.FC = () => {
             </a>
           </div>
 
-          {/* Error Message */}
+          {/* Error Message Callout */}
           {errorMessage && (
-            <div className="mb-5 p-3.5 rounded-xl bg-red-950/80 border border-red-800 text-red-200 text-xs flex items-start gap-2.5 animate-fadeIn">
+            <div className="mb-5 p-3.5 rounded-xl bg-red-950/90 border border-red-800 text-red-200 text-xs flex items-start gap-2.5 animate-fadeIn">
               <ShieldAlert className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-              <div>
-                <p className="font-bold">Access Denied</p>
-                <p className="mt-0.5 text-red-300/90 leading-relaxed">{errorMessage}</p>
+              <div className="space-y-1">
+                <p className="font-bold">Sign-In Notice</p>
+                <p className="text-red-200/90 leading-relaxed text-[11px]">{errorMessage}</p>
+
+                {isUnauthorizedDomain && (
+                  <div className="mt-2 p-2 bg-black/40 rounded border border-red-900/60 text-[10px] text-neutral-300 space-y-1">
+                    <p className="font-semibold text-amber-300">Quick Fix for Firebase Domain Authorization:</p>
+                    <ol className="list-decimal pl-4 space-y-0.5 text-neutral-400">
+                      <li>Open Firebase Console &gt; Project <code className="text-white">gen-lang-client-0374540928</code></li>
+                      <li>Go to <strong>Authentication</strong> &gt; <strong>Settings</strong> &gt; <strong>Authorized domains</strong></li>
+                      <li>Click <strong>Add domain</strong> and enter: <code className="text-emerald-300 font-mono">{currentHost}</code></li>
+                    </ol>
+                  </div>
+                )}
               </div>
             </div>
           )}
 
           {sheetSyncError && (
             <div className="mb-4 text-[11px] text-amber-400/90 bg-amber-950/40 p-2.5 rounded-lg border border-amber-800/40">
-              Note: {sheetSyncError}. Using synced teacher roster.
+              Note: {sheetSyncError}. Using cached authorized teacher roster.
             </div>
           )}
 
-          {/* Primary Action: Sign in with Google (OAuth Required) */}
+          {/* Diagnostics Accordion */}
+          {showDiagnostics && (
+            <div className="mb-5 p-3.5 rounded-xl bg-neutral-950 border border-neutral-800 text-xs space-y-2 text-neutral-400">
+              <div className="font-bold text-white flex items-center gap-1.5">
+                <Globe className="w-3.5 h-3.5 text-blue-400" />
+                <span>Environment & Roster Info</span>
+              </div>
+              <div className="space-y-1 text-[11px] font-mono">
+                <p>Host: <span className="text-neutral-200">{currentHost}</span></p>
+                <p>SuperAdmin: <span className="text-emerald-300">hermanf@gisboyshigh.net</span></p>
+                <p>Known Teachers: <span className="text-neutral-200">{authorizedTeachers.length} accounts</span></p>
+                <p>Sheet Tab: <span className="text-neutral-200">{SHEET_TAB}</span></p>
+              </div>
+            </div>
+          )}
+
+          {/* Primary Action: Sign in with Google */}
           <div className="space-y-4">
             <div className="p-3.5 rounded-xl bg-neutral-950/90 border border-neutral-800/90 space-y-1.5 text-xs text-neutral-300">
               <div className="flex items-center gap-2 text-white font-semibold">
                 <KeyRound className="w-4 h-4 text-red-500" />
-                <span>Google Account Verification Required</span>
+                <span>Google Account Verification</span>
               </div>
               <p className="text-[11px] text-neutral-400 leading-relaxed">
-                Sign in using your school Google account. The portal cross-checks your account email directly against <strong className="text-neutral-200">Column C</strong> of the <span className="font-mono text-neutral-200">TEACHERS_26</span> spreadsheet.
+                Sign in with your school Google account (<strong className="text-neutral-200">@gisboyshigh.net</strong>). Access is granted to verified accounts listed in <strong className="text-neutral-200">Column C</strong> of the <span className="font-mono text-neutral-200">TEACHERS_26</span> sheet.
               </p>
             </div>
 
@@ -143,8 +195,19 @@ export const TeacherLoginPage: React.FC = () => {
                   />
                 </svg>
               )}
-              <span>{isLoading ? 'Verifying with Google...' : 'Sign In with Google Account'}</span>
+              <span>{isLoading ? 'Connecting to Google...' : 'Sign In with Google Account'}</span>
             </button>
+
+            {/* Note for Herman and Dean Accounts */}
+            <div className="p-3 rounded-xl bg-neutral-950/60 border border-neutral-800/80 text-[11px] text-neutral-400 space-y-1">
+              <div className="flex items-center gap-1.5 text-neutral-300 font-medium">
+                <UserCheck className="w-3.5 h-3.5 text-red-400" />
+                <span>Dean of Houses: Herman F.</span>
+              </div>
+              <p className="text-[10.5px] leading-normal text-neutral-400 pl-5">
+                Staff account <code className="text-neutral-200">hermanf@gisboyshigh.net</code> is designated with administrative house scoring privileges.
+              </p>
+            </div>
 
             {/* Security Explanation */}
             <div className="pt-3 border-t border-neutral-800 text-[11px] text-neutral-400 space-y-1.5">
@@ -153,7 +216,7 @@ export const TeacherLoginPage: React.FC = () => {
                 <span>Strict Column C Authorization</span>
               </div>
               <p className="text-neutral-400 leading-normal pl-5">
-                Only authenticated Google users whose email matches an entry in Column C of <code className="text-neutral-200">TEACHERS_26</code> can record points. All unauthorized logins are rejected and signed out automatically.
+                Only authenticated Google users whose email matches an entry in Column C of <code className="text-neutral-200">TEACHERS_26</code> can record points.
               </p>
             </div>
           </div>

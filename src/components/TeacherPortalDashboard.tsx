@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import { useHousePoints } from '../context/HousePointsContext';
 import { HouseId, PointCategory, SchoolTerm } from '../types';
-import { SPREADSHEET_ID, SHEET_TAB, SHEET_URL } from '../services/sheetsAuth';
+import { SPREADSHEET_ID, SHEET_TAB, SHEET_URL, parseTeacherCsv } from '../services/sheetsAuth';
 
 export const TeacherPortalDashboard: React.FC = () => {
   const {
@@ -36,6 +36,8 @@ export const TeacherPortalDashboard: React.FC = () => {
     deletePointEvent,
     exportLedgerCSV,
     authorizedTeachers,
+    updateAuthorizedTeachers,
+    addAuthorizedTeacher,
     syncSheetTeachers,
     isSyncingSheet,
     sheetSyncError,
@@ -65,6 +67,15 @@ export const TeacherPortalDashboard: React.FC = () => {
 
   // Selected house for detailed profile in "houses" tab
   const [activeHouseProfile, setActiveHouseProfile] = useState<HouseId>('tumatauenga');
+
+  // Teacher Roster Management State
+  const [showAddTeacherModal, setShowAddTeacherModal] = useState(false);
+  const [newTeacherName, setNewTeacherName] = useState('');
+  const [newTeacherEmail, setNewTeacherEmail] = useState('');
+  const [newTeacherRole, setNewTeacherRole] = useState('GBHS Staff');
+  const [pasteText, setPasteText] = useState('');
+  const [importMode, setImportMode] = useState<'single' | 'paste'>('single');
+  const [rosterNotice, setRosterNotice] = useState<string | null>(null);
 
   const quickEventTitles = [
     'Inter-House Athletics 100m Sprint',
@@ -798,15 +809,34 @@ export const TeacherPortalDashboard: React.FC = () => {
                   </a>
 
                   <button
+                    onClick={() => {
+                      setRosterNotice(null);
+                      setShowAddTeacherModal(true);
+                    }}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-bold transition-colors border border-neutral-700 cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>Manage Teachers</span>
+                  </button>
+
+                  <button
                     onClick={syncSheetTeachers}
                     disabled={isSyncingSheet}
-                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-red-700 hover:bg-red-600 text-white text-xs font-bold transition-colors shadow-sm"
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-red-700 hover:bg-red-600 text-white text-xs font-bold transition-colors shadow-sm cursor-pointer disabled:opacity-60"
                   >
                     <RefreshCw className={`w-3.5 h-3.5 ${isSyncingSheet ? 'animate-spin' : ''}`} />
                     <span>Sync from Sheet</span>
                   </button>
                 </div>
               </div>
+
+              {/* Notice Message */}
+              {rosterNotice && (
+                <div className="mb-4 p-3 rounded-xl bg-emerald-950/80 border border-emerald-800 text-emerald-200 text-xs flex items-center gap-2">
+                  <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+                  <span>{rosterNotice}</span>
+                </div>
+              )}
 
               {/* Sheet Metadata Box */}
               <div className="mb-6 p-4 rounded-xl bg-neutral-950 border border-neutral-800 text-xs space-y-2">
@@ -820,21 +850,26 @@ export const TeacherPortalDashboard: React.FC = () => {
                 </div>
                 {sheetLastSynced && (
                   <p className="text-[11px] text-neutral-500">
-                    Last synchronized from Google Sheets: {new Date(sheetLastSynced).toLocaleTimeString()}
+                    Last synchronized: {new Date(sheetLastSynced).toLocaleTimeString()}
                   </p>
                 )}
                 {sheetSyncError && (
                   <p className="text-[11px] text-amber-400 bg-amber-950/40 p-2 rounded border border-amber-800/40">
-                    Sync notice: {sheetSyncError}
+                    Notice: {sheetSyncError}. Teacher roster is synced via cloud database.
                   </p>
                 )}
               </div>
 
               {/* Current Teacher List */}
               <div className="space-y-2">
-                <span className="text-xs font-bold uppercase tracking-wider text-neutral-400 block mb-2">
-                  Teachers on Sheet ({authorizedTeachers.length})
-                </span>
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-xs font-bold uppercase tracking-wider text-neutral-400 block">
+                    Verified Teachers ({authorizedTeachers.length})
+                  </span>
+                  <span className="text-[11px] text-neutral-400">
+                    Column C Google Account Access
+                  </span>
+                </div>
 
                 {authorizedTeachers.map((t) => (
                   <div
@@ -868,6 +903,178 @@ export const TeacherPortalDashboard: React.FC = () => {
                 ))}
               </div>
             </div>
+
+            {/* Modal for Managing Teachers */}
+            {showAddTeacherModal && (
+              <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className="bg-neutral-900 border border-neutral-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
+                  <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
+                    <h3 className="font-bold text-base text-white">
+                      Manage Authorized Staff (Column C)
+                    </h3>
+                    <button
+                      onClick={() => setShowAddTeacherModal(false)}
+                      className="text-neutral-400 hover:text-white text-xs px-2 py-1 rounded bg-neutral-800 cursor-pointer"
+                    >
+                      Close
+                    </button>
+                  </div>
+
+                  <div className="flex gap-2 p-1 bg-neutral-950 rounded-lg">
+                    <button
+                      type="button"
+                      onClick={() => setImportMode('single')}
+                      className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+                        importMode === 'single'
+                          ? 'bg-neutral-800 text-white'
+                          : 'text-neutral-400 hover:text-neutral-200'
+                      }`}
+                    >
+                      Add Single Staff
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setImportMode('paste')}
+                      className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors ${
+                        importMode === 'paste'
+                          ? 'bg-neutral-800 text-white'
+                          : 'text-neutral-400 hover:text-neutral-200'
+                      }`}
+                    >
+                      Paste Column C Rows
+                    </button>
+                  </div>
+
+                  {importMode === 'single' ? (
+                    <form
+                      onSubmit={(e) => {
+                        e.preventDefault();
+                        if (!newTeacherEmail.trim() || !newTeacherEmail.includes('@')) {
+                          alert('Please enter a valid Google account email.');
+                          return;
+                        }
+                        addAuthorizedTeacher({
+                          name: newTeacherName.trim() || newTeacherEmail.split('@')[0],
+                          email: newTeacherEmail.trim().toLowerCase(),
+                          role: newTeacherRole.trim() || 'GBHS Staff',
+                          isSuperAdmin: newTeacherEmail.trim().toLowerCase() === 'hermanf@gisboyshigh.net',
+                        });
+                        setRosterNotice(`Added ${newTeacherEmail.trim()} to authorized teachers roster.`);
+                        setNewTeacherName('');
+                        setNewTeacherEmail('');
+                        setShowAddTeacherModal(false);
+                      }}
+                      className="space-y-3 text-xs"
+                    >
+                      <div>
+                        <label className="block text-neutral-400 font-semibold mb-1">
+                          Teacher Name
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Herman F."
+                          value={newTeacherName}
+                          onChange={(e) => setNewTeacherName(e.target.value)}
+                          className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-neutral-400 font-semibold mb-1">
+                          Google Account Email (From Column C) *
+                        </label>
+                        <input
+                          type="email"
+                          required
+                          placeholder="teacher@gisboyshigh.net"
+                          value={newTeacherEmail}
+                          onChange={(e) => setNewTeacherEmail(e.target.value)}
+                          className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-neutral-400 font-semibold mb-1">
+                          Role / House
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Tangaroa House Dean"
+                          value={newTeacherRole}
+                          onChange={(e) => setNewTeacherRole(e.target.value)}
+                          className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white"
+                        />
+                      </div>
+
+                      <div className="pt-2 flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowAddTeacherModal(false)}
+                          className="px-3 py-2 rounded-lg bg-neutral-800 text-neutral-300 hover:text-white"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="submit"
+                          className="px-4 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-white font-bold"
+                        >
+                          Save Teacher
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <div className="space-y-3 text-xs">
+                      <p className="text-neutral-400 leading-relaxed">
+                        Copy rows or emails straight from Google Sheet <code className="text-neutral-200">TEACHERS_26</code> and paste here. Column C emails will be automatically extracted.
+                      </p>
+                      <textarea
+                        rows={6}
+                        value={pasteText}
+                        onChange={(e) => setPasteText(e.target.value)}
+                        placeholder={`Herman F.\tDean of Houses\thermanf@gisboyshigh.net\nMs. K. Walker\tAquatics Dean\tk.walker@gisboyshigh.net`}
+                        className="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-lg text-white font-mono text-xs"
+                      />
+                      <div className="flex justify-end gap-2">
+                        <button
+                          type="button"
+                          onClick={() => setShowAddTeacherModal(false)}
+                          className="px-3 py-2 rounded-lg bg-neutral-800 text-neutral-300 hover:text-white"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const parsed = parseTeacherCsv(pasteText);
+                            if (parsed.length === 0) {
+                              alert('No valid email addresses found in pasted text. Please make sure rows contain emails.');
+                              return;
+                            }
+                            // Merge with existing
+                            const merged = [...authorizedTeachers];
+                            parsed.forEach((p) => {
+                              const idx = merged.findIndex((m) => m.email.toLowerCase() === p.email.toLowerCase());
+                              if (idx >= 0) {
+                                merged[idx] = p;
+                              } else {
+                                merged.push(p);
+                              }
+                            });
+                            updateAuthorizedTeachers(merged);
+                            setRosterNotice(`Successfully imported ${parsed.length} teachers from pasted data.`);
+                            setPasteText('');
+                            setShowAddTeacherModal(false);
+                          }}
+                          className="px-4 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-white font-bold"
+                        >
+                          Import & Sync to Cloud
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         )}
 

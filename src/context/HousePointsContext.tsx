@@ -11,14 +11,13 @@ import {
   query,
   orderBy,
 } from 'firebase/firestore';
-import { db, handleFirestoreError, OperationType, testFirestoreConnection } from '../services/firebase';
+import { db, auth, handleFirestoreError, OperationType, testFirestoreConnection } from '../services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
 import { House, HouseId, PointEvent, TeacherUser, TeacherAccount, SchoolTerm, PointCategory } from '../types';
 import { INITIAL_HOUSES, INITIAL_POINT_EVENTS, INITIAL_AUTHORIZED_TEACHERS } from '../data/initialData';
 import { soundManager } from '../utils/audio';
 import {
-  auth,
-  signInWithGoogleSheets,
+  signInWithGoogleAccount,
   fetchTeachersFromSheet,
   logoutGoogle,
   getCachedAccessToken,
@@ -42,6 +41,8 @@ interface HousePointsContextType {
   setSelectedCategory: (cat: PointCategory | 'All Categories') => void;
   teacherUser: TeacherUser | null;
   authorizedTeachers: TeacherAccount[];
+  updateAuthorizedTeachers: (teachers: TeacherAccount[]) => Promise<void>;
+  addAuthorizedTeacher: (teacher: TeacherAccount) => Promise<void>;
   currentView: AppView;
   setCurrentView: (view: AppView) => void;
   signInWithGoogle: () => Promise<{ success: boolean; error?: string }>;
@@ -77,22 +78,25 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     return INITIAL_POINT_EVENTS;
   });
 
-  // Authorized teachers loaded from Google Sheet (TEACHERS_26 tab)
+  // Authorized teachers loaded from Google Sheet (TEACHERS_26 tab, Column C)
   const [authorizedTeachers, setAuthorizedTeachers] = useState<TeacherAccount[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_SHEET_TEACHERS_KEY);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
     } catch {}
     return INITIAL_AUTHORIZED_TEACHERS;
   });
 
-  // Teacher user session (only genuine Google OAuth sessions allowed; manual tokens purged)
+  // Teacher user session (authenticated via Google)
   const [teacherUser, setTeacherUser] = useState<TeacherUser | null>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_AUTH_KEY);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed?.token && !parsed.token.startsWith('manual-token')) {
+        if (parsed?.email) {
           return parsed;
         }
       }
@@ -126,7 +130,7 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   useEffect(() => {
     try {
-      if (teacherUser && (!teacherUser.token || !teacherUser.token.startsWith('manual-token'))) {
+      if (teacherUser && teacherUser.email) {
         localStorage.setItem(STORAGE_AUTH_KEY, JSON.stringify(teacherUser));
       } else {
         localStorage.removeItem(STORAGE_AUTH_KEY);
@@ -138,7 +142,6 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
       if (!firebaseUser) {
-        // If not signed into Google, ensure teacherUser is null
         setTeacherUser(null);
         setCachedAccessToken(null);
         try {
@@ -147,10 +150,12 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
       } else {
         const cleanEmail = (firebaseUser.email || '').trim().toLowerCase();
         const isOwner = cleanEmail === 'hermanf@gisboyshigh.net';
-        const isListed = authorizedTeachers.some((t) => t.email.toLowerCase() === cleanEmail);
+        const isListed =
+          authorizedTeachers.some((t) => t.email.toLowerCase() === cleanEmail) ||
+          INITIAL_AUTHORIZED_TEACHERS.some((t) => t.email.toLowerCase() === cleanEmail);
 
+        // Only revoke if definitely not authorized
         if (!isOwner && !isListed && authorizedTeachers.length > 0) {
-          // Unlisted Google account detected; revoke session
           try {
             await logoutGoogle();
           } catch {}
@@ -177,7 +182,7 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
       eventsQuery,
       async (snapshot) => {
         if (snapshot.empty) {
-          // If the Firestore collection is fresh and empty, automatically seed initial house events
+          // If Firestore is fresh and empty, auto-seed initial events
           try {
             const batch = writeBatch(db);
             INITIAL_POINT_EVENTS.forEach((ev) => {
@@ -204,17 +209,35 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
       }
     );
 
-    // Sync authorized teacher roster across devices
+    // Sync authorized teacher roster across devices from Firestore
     const teachersRef = collection(db, 'authorizedTeachers');
     const unsubscribeTeachers = onSnapshot(
       teachersRef,
-      (snapshot) => {
+      async (snapshot) => {
         if (!snapshot.empty) {
           const liveTeachers: TeacherAccount[] = [];
           snapshot.forEach((d) => {
             liveTeachers.push(d.data() as TeacherAccount);
           });
           setAuthorizedTeachers(liveTeachers);
+        } else {
+          // Pre-seed default teachers to Firestore
+          try {
+            const batch = writeBatch(db);
+            INITIAL_AUTHORIZED_TEACHERS.forEach((t) => {
+              const docId = t.email.toLowerCase().replace(/[^a-zA-Z0-9_-]/g, '_');
+              batch.set(doc(db, 'authorizedTeachers', docId), {
+                email: t.email,
+                name: t.name,
+                role: t.role,
+                isSuperAdmin: !!t.isSuperAdmin,
+                updatedAt: Date.now(),
+              });
+            });
+            await batch.commit();
+          } catch (err) {
+            console.warn('Initial teacher roster seed note:', err);
+          }
         }
       },
       (error) => {
@@ -310,10 +333,52 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
   }, [computedHouses, prevLeaderId, triggerConfetti]);
 
-  // Sync teachers directly from Google Sheet (tab TEACHERS_26)
+  // Update authorized teachers list in memory and sync to Firestore
+  const updateAuthorizedTeachers = async (newTeachers: TeacherAccount[]) => {
+    setAuthorizedTeachers(newTeachers);
+    try {
+      const batch = writeBatch(db);
+      newTeachers.forEach((t) => {
+        const docId = t.email.toLowerCase().replace(/[^a-zA-Z0-9_-]/g, '_');
+        batch.set(
+          doc(db, 'authorizedTeachers', docId),
+          {
+            email: t.email.toLowerCase().trim(),
+            name: t.name.trim(),
+            role: t.role.trim() || 'GBHS Staff',
+            isSuperAdmin: t.email.toLowerCase().trim() === 'hermanf@gisboyshigh.net' || !!t.isSuperAdmin,
+            updatedAt: Date.now(),
+          },
+          { merge: true }
+        );
+      });
+      await batch.commit();
+    } catch (err) {
+      console.warn('Error saving teachers to Firestore:', err);
+    }
+  };
+
+  // Add single authorized teacher
+  const addAuthorizedTeacher = async (teacher: TeacherAccount) => {
+    const cleanEmail = teacher.email.toLowerCase().trim();
+    const updated = [
+      ...authorizedTeachers.filter((t) => t.email.toLowerCase() !== cleanEmail),
+      {
+        ...teacher,
+        email: cleanEmail,
+        isSuperAdmin: cleanEmail === 'hermanf@gisboyshigh.net' || !!teacher.isSuperAdmin,
+      },
+    ];
+    await updateAuthorizedTeachers(updated);
+  };
+
+  // Sync teachers directly from Google Sheet (tab TEACHERS_26) if token is available
   const syncSheetTeachers = async () => {
     const token = getCachedAccessToken();
-    if (!token) return;
+    if (!token) {
+      setSheetSyncError('No Google Sheets access token available. Use manual import or sign in with Google permissions.');
+      return;
+    }
 
     setIsSyncingSheet(true);
     setSheetSyncError(null);
@@ -321,30 +386,8 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     try {
       const sheetTeachers = await fetchTeachersFromSheet(token);
       if (sheetTeachers && sheetTeachers.length > 0) {
-        setAuthorizedTeachers(sheetTeachers);
+        await updateAuthorizedTeachers(sheetTeachers);
         setSheetLastSynced(Date.now());
-
-        // Sync to Firestore so all connected devices immediately have the verified roster
-        try {
-          const batch = writeBatch(db);
-          sheetTeachers.forEach((t) => {
-            const docId = t.email.toLowerCase().replace(/[^a-zA-Z0-9_-]/g, '_');
-            batch.set(
-              doc(db, 'authorizedTeachers', docId),
-              {
-                email: t.email,
-                name: t.name,
-                role: t.role,
-                isSuperAdmin: !!t.isSuperAdmin,
-                updatedAt: Date.now(),
-              },
-              { merge: true }
-            );
-          });
-          await batch.commit();
-        } catch (dbErr) {
-          console.warn('Could not mirror sheet teachers to Firestore:', dbErr);
-        }
       }
     } catch (err: any) {
       console.warn('Sheet sync warning:', err);
@@ -356,9 +399,10 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   /**
    * Primary Teacher Google Login Flow:
-   * 1. Signs in via genuine Google OAuth popup (requesting spreadsheets.readonly).
-   * 2. Reads the Google Sheet (1lzQe8aBQXxv615t8-cR_BfHHtbVHHkPxbix_dlS9b-Y, tab TEACHERS_26).
-   * 3. Column C contains the verified Google account emails permitted to access the scoring portal.
+   * 1. Signs in via genuine Google OAuth popup using standard profile and email scopes.
+   *    (Avoids Google Workspace unverified app blocking for @gisboyshigh.net domain accounts).
+   * 2. Checks user's verified Google account email against Column C of the TEACHERS_26 sheet roster.
+   * 3. hermanf@gisboyshigh.net is recognized as Dean & SuperAdmin.
    * 4. Only allows access if the signed-in user's email matches an email in Column C.
    */
   const signInWithGoogle = async (): Promise<{ success: boolean; error?: string }> => {
@@ -366,60 +410,50 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     setSheetSyncError(null);
 
     try {
-      // 1. Google OAuth Sign-In Popup
-      const { user, accessToken } = await signInWithGoogleSheets();
+      // 1. Google OAuth Sign-In Popup with standard profile/email permissions
+      const { user, accessToken } = await signInWithGoogleAccount(false);
       const userEmail = (user.email || '').trim().toLowerCase();
 
       if (!userEmail) {
         await logoutGoogle();
         return {
           success: false,
-          error: 'No email address was returned by Google. Please ensure you sign in with a valid school Google account.',
+          error: 'No email address was returned by Google. Please ensure you sign in with your school Google account.',
         };
       }
 
-      // 2. Fetch latest teacher roster from Google Sheet (tab TEACHERS_26, Column C)
-      let teachersList = authorizedTeachers;
-      try {
-        const fetched = await fetchTeachersFromSheet(accessToken);
-        if (fetched && fetched.length > 0) {
-          teachersList = fetched;
-          setAuthorizedTeachers(fetched);
-          setSheetLastSynced(Date.now());
-
-          // Persist to Firestore
-          try {
-            const batch = writeBatch(db);
-            fetched.forEach((t) => {
-              const docId = t.email.toLowerCase().replace(/[^a-zA-Z0-9_-]/g, '_');
-              batch.set(
-                doc(db, 'authorizedTeachers', docId),
-                {
-                  email: t.email,
-                  name: t.name,
-                  role: t.role,
-                  isSuperAdmin: !!t.isSuperAdmin,
-                  updatedAt: Date.now(),
-                },
-                { merge: true }
-              );
-            });
-            await batch.commit();
-          } catch (fErr) {
-            console.warn('Firestore teacher batch sync note:', fErr);
-          }
+      // 2. Combine current live roster and initial roster
+      const allKnown = [...authorizedTeachers];
+      INITIAL_AUTHORIZED_TEACHERS.forEach((initT) => {
+        if (!allKnown.some((t) => t.email.toLowerCase() === initT.email.toLowerCase())) {
+          allKnown.push(initT);
         }
-      } catch (sheetErr: any) {
-        console.warn('Could not read sheet directly, falling back to cached roster:', sheetErr);
-        setSheetSyncError(sheetErr?.message || 'Could not fetch live sheet');
+      });
+
+      // Attempt optional sheet sync if accessToken was returned
+      if (accessToken) {
+        try {
+          const fetched = await fetchTeachersFromSheet(accessToken);
+          if (fetched && fetched.length > 0) {
+            await updateAuthorizedTeachers(fetched);
+            setSheetLastSynced(Date.now());
+            fetched.forEach((f) => {
+              if (!allKnown.some((t) => t.email.toLowerCase() === f.email.toLowerCase())) {
+                allKnown.push(f);
+              }
+            });
+          }
+        } catch (sheetErr: any) {
+          console.warn('Sheet fetch note (using cached roster):', sheetErr?.message);
+        }
       }
 
       // 3. Check if user's Google email is registered in Column C of TEACHERS_26
-      const matchedTeacher = teachersList.find(
+      const matchedTeacher = allKnown.find(
         (t) => t.email.toLowerCase() === userEmail
       );
 
-      // App Dean / Owner verification: hermanf@gisboyshigh.net
+      // School Dean / Owner verification: hermanf@gisboyshigh.net
       const isOwner = userEmail === 'hermanf@gisboyshigh.net';
 
       if (!matchedTeacher && !isOwner) {
@@ -432,12 +466,12 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
         return {
           success: false,
-          error: `Access Denied: "${userEmail}" is not listed in Column C of the TEACHERS_26 Google Sheet. Only teachers whose Google email is verified on that spreadsheet can log in to award house points.`,
+          error: `Access Denied: You signed in as "${userEmail}". Only teachers whose Google email is in Column C of the TEACHERS_26 Google Sheet are authorized to award points. If you have another Google account, please click "Sign In with Google Account" and select your school email.`,
         };
       }
 
-      const teacherName = matchedTeacher?.name || user.displayName || 'GBHS Teacher';
-      const teacherRole = matchedTeacher?.role || 'Staff & House Dean';
+      const teacherName = matchedTeacher?.name || user.displayName || (isOwner ? 'Herman F.' : 'GBHS Teacher');
+      const teacherRole = matchedTeacher?.role || (isOwner ? 'Dean of Houses & Sports Coordinator' : 'Staff & House Dean');
 
       const authenticatedUser: TeacherUser = {
         email: userEmail,
@@ -459,9 +493,19 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
         await logoutGoogle();
       } catch {}
       setTeacherUser(null);
+
+      let friendlyError = err?.message || 'Failed to sign in with Google.';
+      if (err?.code === 'auth/unauthorized-domain') {
+        friendlyError = `Domain Authorization Required: The domain "${window.location.hostname}" is not yet added to Firebase Authentication Authorized Domains. Please add "${window.location.hostname}" in Firebase Console -> Authentication -> Settings -> Authorized Domains.`;
+      } else if (err?.code === 'auth/popup-blocked') {
+        friendlyError = 'Sign-in popup was blocked by your browser. Please allow popups for this site and try again.';
+      } else if (err?.code === 'auth/popup-closed-by-user') {
+        friendlyError = 'The Google sign-in window was closed before completing.';
+      }
+
       return {
         success: false,
-        error: err?.message || 'Failed to sign in with Google.',
+        error: friendlyError,
       };
     } finally {
       setIsSyncingSheet(false);
@@ -480,8 +524,7 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   /**
    * ADD POINTS:
-   * Instantly creates a live PointEvent and writes to Cloud Firestore.
-   * All connected screens in assembly halls and on devices receive the live score update instantly.
+   * Writes to Cloud Firestore. All connected screens receive live updates instantly.
    */
   const addPoints = async (data: Omit<PointEvent, 'id' | 'timestamp'>) => {
     const newEvent: PointEvent = {
@@ -509,7 +552,6 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   /**
    * DELETE POINT EVENT:
-   * Deletes from Cloud Firestore and broadcasts deletion to all live displays.
    */
   const deletePointEvent = async (id: string) => {
     setEvents((prev) => prev.filter((e) => e.id !== id));
@@ -524,7 +566,6 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   /**
    * EDIT POINT EVENT:
-   * Updates doc in Cloud Firestore and syncs across all devices.
    */
   const editPointEvent = async (id: string, updatedFields: Partial<PointEvent>) => {
     setEvents((prev) => prev.map((ev) => (ev.id === id ? { ...ev, ...updatedFields } : ev)));
@@ -537,8 +578,7 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   };
 
   /**
-   * RESET TO DEFAULT:
-   * Replaces Firestore items with default baseline dataset.
+   * RESET TO DEFAULT DATA:
    */
   const resetToDefaultData = async () => {
     soundManager.playClick();
@@ -617,6 +657,8 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
         setSelectedCategory,
         teacherUser,
         authorizedTeachers,
+        updateAuthorizedTeachers,
+        addAuthorizedTeacher,
         currentView,
         setCurrentView,
         signInWithGoogle,

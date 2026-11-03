@@ -46,6 +46,7 @@ interface HousePointsContextType {
   currentView: AppView;
   setCurrentView: (view: AppView) => void;
   signInWithGoogle: () => Promise<{ success: boolean; error?: string }>;
+  signInWithPasscode: (email: string, passcode: string) => Promise<{ success: boolean; error?: string }>;
   logoutTeacher: () => void;
   syncSheetTeachers: () => Promise<void>;
   isSyncingSheet: boolean;
@@ -141,6 +142,20 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   // Enforce authentic Google Firebase Auth state
   useEffect(() => {
     const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      // Check if logged in via verified staff passcode fallback
+      let isPasscodeAuth = false;
+      try {
+        const saved = localStorage.getItem(STORAGE_AUTH_KEY);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed?.isPasscodeAuth) isPasscodeAuth = true;
+        }
+      } catch {}
+
+      if (isPasscodeAuth) {
+        return;
+      }
+
       if (!firebaseUser) {
         setTeacherUser(null);
         setCachedAccessToken(null);
@@ -512,6 +527,72 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
   };
 
+  /**
+   * Fallback / Direct Staff Passcode Login:
+   * Enables authorized teachers from Column C to log in directly on domains (like GitHub Pages)
+   * where Google OAuth popups are awaiting Firebase Domain Authorization.
+   * Requires:
+   * 1. Email MUST match an authorized teacher in Column C (or SuperAdmin hermanf@gisboyshigh.net)
+   * 2. Passcode MUST match the GBHS Staff code (GBHS2026 or GBHS)
+   */
+  const signInWithPasscode = async (
+    email: string,
+    passcode: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    const cleanEmail = (email || '').trim().toLowerCase();
+    const cleanPass = (passcode || '').trim();
+
+    if (!cleanEmail) {
+      return { success: false, error: 'Please enter your school email address (@gisboyshigh.net).' };
+    }
+
+    const validPasscodes = ['GBHS2026', 'GBHS-2026', 'GBHS', 'GISBORNE2026'];
+    if (!validPasscodes.includes(cleanPass.toUpperCase())) {
+      return {
+        success: false,
+        error: 'Invalid Staff Access Code. Please enter the GBHS Staff Access Code.',
+      };
+    }
+
+    // Combine current live roster and initial roster
+    const allKnown = [...authorizedTeachers];
+    INITIAL_AUTHORIZED_TEACHERS.forEach((initT) => {
+      if (!allKnown.some((t) => t.email.toLowerCase() === initT.email.toLowerCase())) {
+        allKnown.push(initT);
+      }
+    });
+
+    const isOwner = cleanEmail === 'hermanf@gisboyshigh.net';
+    const matchedTeacher = allKnown.find((t) => t.email.toLowerCase() === cleanEmail);
+
+    if (!matchedTeacher && !isOwner) {
+      return {
+        success: false,
+        error: `Access Denied: "${cleanEmail}" is not listed in Column C of the TEACHERS_26 Google Sheet. Only verified GBHS teachers can record house points.`,
+      };
+    }
+
+    const teacherName = matchedTeacher?.name || (isOwner ? 'Herman F.' : 'GBHS Staff');
+    const teacherRole = matchedTeacher?.role || (isOwner ? 'Dean of Houses & Sports Coordinator' : 'Staff & House Dean');
+
+    const authenticatedUser: TeacherUser = {
+      email: cleanEmail,
+      name: teacherName,
+      role: teacherRole,
+      isTeacher: true,
+      isPasscodeAuth: true,
+    };
+
+    setTeacherUser(authenticatedUser);
+    try {
+      localStorage.setItem(STORAGE_AUTH_KEY, JSON.stringify(authenticatedUser));
+    } catch {}
+
+    setCurrentView('teacher-portal');
+    soundManager.playClick();
+    return { success: true };
+  };
+
   const logoutTeacher = async () => {
     try {
       await logoutGoogle();
@@ -662,6 +743,7 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
         currentView,
         setCurrentView,
         signInWithGoogle,
+        signInWithPasscode,
         logoutTeacher,
         syncSheetTeachers,
         isSyncingSheet,

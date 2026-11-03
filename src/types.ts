@@ -54,4 +54,5 @@ export interface TeacherUser {
   picture?: string;
   token?: string;
   isTeacher: boolean;
+  isPasscodeAuth?: boolean;
 }

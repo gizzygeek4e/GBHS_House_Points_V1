@@ -3,6 +3,8 @@ import { Trophy, Sparkles, Volume2, VolumeX, ShieldCheck, UserCheck, ArrowRight,
 import { useHousePoints } from '../context/HousePointsContext';
 import { SchoolTerm } from '../types';
 
+import gbhsHeaderLogo from '../assets/gbhs_header_logo.png';
+
 export const AssemblyIndexView: React.FC = () => {
   const {
     houses,
@@ -24,23 +26,20 @@ export const AssemblyIndexView: React.FC = () => {
       {/* Top Header Strip */}
       <header className="bg-neutral-950/90 border-b border-neutral-800/80 px-4 sm:px-8 py-3.5 backdrop-blur-md sticky top-0 z-30">
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
-          {/* School Brand Lockup */}
+          {/* School Brand Lockup with Official Logo, Header & Sub Header */}
           <div className="flex items-center gap-3.5">
-            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-red-700 via-red-800 to-black flex items-center justify-center border border-red-600/50 shadow-md shadow-red-950/50 shrink-0">
-              <span className="font-extrabold text-sm tracking-wider text-white">GBHS</span>
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-bold text-base sm:text-lg tracking-tight text-white font-display">
-                  Gisborne Boys' High School
-                </span>
-                <span className="hidden md:inline-block px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider bg-red-950 text-red-300 border border-red-800/60 font-mono">
-                  Live Assembly Display
-                </span>
-              </div>
-              <p className="text-xs text-neutral-400 font-medium">
-                Te Kura Taitama o Tūranga <span className="text-neutral-600">·</span> Toa Takitini
-              </p>
+            <img
+              src={gbhsHeaderLogo}
+              alt="Gisborne Boys' High School · Toa Hinga Kore, Toa Mate Kore"
+              className="h-11 sm:h-12 md:h-13 w-auto object-contain rounded-lg shadow-md border border-red-700/50 shrink-0"
+            />
+            <div className="hidden lg:flex flex-col justify-center border-l border-neutral-800 pl-3">
+              <span className="font-extrabold text-xs uppercase tracking-wider text-white font-display">
+                House Championship
+              </span>
+              <span className="text-[10px] text-red-400 font-mono font-bold">
+                Live Assembly Display
+              </span>
             </div>
           </div>
 

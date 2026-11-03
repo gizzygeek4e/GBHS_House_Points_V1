@@ -23,6 +23,8 @@ import {
 import { useHousePoints } from '../context/HousePointsContext';
 import { HouseId, PointCategory, SchoolTerm } from '../types';
 import { SPREADSHEET_ID, SHEET_TAB, SHEET_URL, parseTeacherCsv } from '../services/sheetsAuth';
+import gbhsHeaderLogo from '../assets/gbhs_header_logo.png';
+import gbhsCrest from '../assets/gbhs_crest.png';
 
 export const TeacherPortalDashboard: React.FC = () => {
   const {
@@ -146,21 +148,23 @@ export const TeacherPortalDashboard: React.FC = () => {
       <header className="bg-neutral-950/95 border-b border-neutral-800/80 px-4 sm:px-8 py-3.5 sticky top-0 z-30 backdrop-blur-md">
         <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
           {/* Brand & Return Link */}
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-3.5">
             <button
               onClick={() => setCurrentView('assembly')}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-xs font-semibold text-neutral-300 hover:text-white transition-colors"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Back to Assembly Display</span>
+              <span>Back to Assembly</span>
             </button>
 
-            <div className="flex items-center gap-2 pl-2 border-l border-neutral-800">
-              <span className="font-extrabold text-sm text-white font-display">
-                GBHS Teacher Scoring Portal
-              </span>
-              <span className="hidden sm:inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-red-950 text-red-300 border border-red-800/60 font-mono">
-                TEACHERS_26 Authorized
+            <div className="flex items-center gap-2.5 pl-3 border-l border-neutral-800">
+              <img
+                src={gbhsHeaderLogo}
+                alt="Gisborne Boys' High School · Toa Hinga Kore, Toa Mate Kore"
+                className="h-10 sm:h-11 w-auto object-contain rounded-md shadow border border-red-700/50 shrink-0"
+              />
+              <span className="hidden xl:inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-red-950 text-red-300 border border-red-800/60 font-mono">
+                Teacher Scoring Portal
               </span>
             </div>
           </div>

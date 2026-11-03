@@ -782,7 +782,7 @@ export const TeacherPortalDashboard: React.FC = () => {
                     Authorized Teachers Roster ({SHEET_TAB})
                   </h2>
                   <p className="text-xs text-neutral-400 mt-0.5">
-                    Only staff with an email listed in this Google Sheet can log in to award house points.
+                    Only staff with a verified Google account email in <strong className="text-neutral-300">Column C</strong> of this Google Sheet can log in to award house points.
                   </p>
                 </div>
 

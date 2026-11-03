@@ -12,10 +12,12 @@ import {
   orderBy,
 } from 'firebase/firestore';
 import { db, handleFirestoreError, OperationType, testFirestoreConnection } from '../services/firebase';
+import { onAuthStateChanged } from 'firebase/auth';
 import { House, HouseId, PointEvent, TeacherUser, TeacherAccount, SchoolTerm, PointCategory } from '../types';
 import { INITIAL_HOUSES, INITIAL_POINT_EVENTS, INITIAL_AUTHORIZED_TEACHERS } from '../data/initialData';
 import { soundManager } from '../utils/audio';
 import {
+  auth,
   signInWithGoogleSheets,
   fetchTeachersFromSheet,
   logoutGoogle,
@@ -43,7 +45,6 @@ interface HousePointsContextType {
   currentView: AppView;
   setCurrentView: (view: AppView) => void;
   signInWithGoogle: () => Promise<{ success: boolean; error?: string }>;
-  manualTeacherVerify: (email: string) => { success: boolean; error?: string };
   logoutTeacher: () => void;
   syncSheetTeachers: () => Promise<void>;
   isSyncingSheet: boolean;
@@ -85,11 +86,16 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     return INITIAL_AUTHORIZED_TEACHERS;
   });
 
-  // Teacher user session
+  // Teacher user session (only genuine Google OAuth sessions allowed; manual tokens purged)
   const [teacherUser, setTeacherUser] = useState<TeacherUser | null>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_AUTH_KEY);
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed?.token && !parsed.token.startsWith('manual-token')) {
+          return parsed;
+        }
+      }
     } catch {}
     return null;
   });
@@ -120,13 +126,44 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   useEffect(() => {
     try {
-      if (teacherUser) {
+      if (teacherUser && (!teacherUser.token || !teacherUser.token.startsWith('manual-token'))) {
         localStorage.setItem(STORAGE_AUTH_KEY, JSON.stringify(teacherUser));
       } else {
         localStorage.removeItem(STORAGE_AUTH_KEY);
       }
     } catch {}
   }, [teacherUser]);
+
+  // Enforce authentic Google Firebase Auth state
+  useEffect(() => {
+    const unsubscribeAuth = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (!firebaseUser) {
+        // If not signed into Google, ensure teacherUser is null
+        setTeacherUser(null);
+        setCachedAccessToken(null);
+        try {
+          localStorage.removeItem(STORAGE_AUTH_KEY);
+        } catch {}
+      } else {
+        const cleanEmail = (firebaseUser.email || '').trim().toLowerCase();
+        const isOwner = cleanEmail === 'hermanf@gisboyshigh.net';
+        const isListed = authorizedTeachers.some((t) => t.email.toLowerCase() === cleanEmail);
+
+        if (!isOwner && !isListed && authorizedTeachers.length > 0) {
+          // Unlisted Google account detected; revoke session
+          try {
+            await logoutGoogle();
+          } catch {}
+          setTeacherUser(null);
+          try {
+            localStorage.removeItem(STORAGE_AUTH_KEY);
+          } catch {}
+        }
+      }
+    });
+
+    return () => unsubscribeAuth();
+  }, [authorizedTeachers]);
 
   // LIVE FIRESTORE REAL-TIME SYNC
   // Connects all community screens, assembly projectors, student phones, and staff laptops
@@ -319,10 +356,10 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   /**
    * Primary Teacher Google Login Flow:
-   * 1. Signs in via Google OAuth popup (requesting spreadsheets.readonly).
+   * 1. Signs in via genuine Google OAuth popup (requesting spreadsheets.readonly).
    * 2. Reads the Google Sheet (1lzQe8aBQXxv615t8-cR_BfHHtbVHHkPxbix_dlS9b-Y, tab TEACHERS_26).
-   * 3. Verifies that the signed-in user's email exists on that Google Sheet!
-   * 4. Only allows access if the email is present on the Google Sheet.
+   * 3. Column C contains the verified Google account emails permitted to access the scoring portal.
+   * 4. Only allows access if the signed-in user's email matches an email in Column C.
    */
   const signInWithGoogle = async (): Promise<{ success: boolean; error?: string }> => {
     setIsSyncingSheet(true);
@@ -333,7 +370,15 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
       const { user, accessToken } = await signInWithGoogleSheets();
       const userEmail = (user.email || '').trim().toLowerCase();
 
-      // 2. Fetch latest teacher roster from Google Sheet (TEACHERS_26)
+      if (!userEmail) {
+        await logoutGoogle();
+        return {
+          success: false,
+          error: 'No email address was returned by Google. Please ensure you sign in with a valid school Google account.',
+        };
+      }
+
+      // 2. Fetch latest teacher roster from Google Sheet (tab TEACHERS_26, Column C)
       let teachersList = authorizedTeachers;
       try {
         const fetched = await fetchTeachersFromSheet(accessToken);
@@ -369,20 +414,25 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
         setSheetSyncError(sheetErr?.message || 'Could not fetch live sheet');
       }
 
-      // 3. Check if user email is present on the Google Sheet
+      // 3. Check if user's Google email is registered in Column C of TEACHERS_26
       const matchedTeacher = teachersList.find(
         (t) => t.email.toLowerCase() === userEmail
       );
 
-      // Also allow user hermanf@gisboyshigh.net (app owner / dean)
+      // App Dean / Owner verification: hermanf@gisboyshigh.net
       const isOwner = userEmail === 'hermanf@gisboyshigh.net';
 
       if (!matchedTeacher && !isOwner) {
-        // Sign out unauthorized user
+        // Revoke Google session immediately
         await logoutGoogle();
+        setTeacherUser(null);
+        try {
+          localStorage.removeItem(STORAGE_AUTH_KEY);
+        } catch {}
+
         return {
           success: false,
-          error: `Access Denied: ${userEmail} is not listed on Google Sheet "TEACHERS_26". Only teachers with an email registered on that sheet are permitted to log in and add points.`,
+          error: `Access Denied: "${userEmail}" is not listed in Column C of the TEACHERS_26 Google Sheet. Only teachers whose Google email is verified on that spreadsheet can log in to award house points.`,
         };
       }
 
@@ -404,6 +454,11 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
       return { success: true };
     } catch (err: any) {
       console.error('Google Sign-In failed:', err);
+      // Clean up on failure
+      try {
+        await logoutGoogle();
+      } catch {}
+      setTeacherUser(null);
       return {
         success: false,
         error: err?.message || 'Failed to sign in with Google.',
@@ -411,42 +466,6 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     } finally {
       setIsSyncingSheet(false);
     }
-  };
-
-  /**
-   * Verified Teacher lookup from cached/synced Google Sheet:
-   * Used for direct verification or testing.
-   */
-  const manualTeacherVerify = (email: string) => {
-    const cleanEmail = email.trim().toLowerCase();
-
-    const matchedTeacher = authorizedTeachers.find(
-      (t) => t.email.toLowerCase() === cleanEmail
-    );
-    const isOwner = cleanEmail === 'hermanf@gisboyshigh.net';
-
-    if (!matchedTeacher && !isOwner) {
-      return {
-        success: false,
-        error: `Access Denied: ${cleanEmail} is not on the Google Sheet "TEACHERS_26". Only verified teachers listed on that spreadsheet can add points.`,
-      };
-    }
-
-    const name = matchedTeacher?.name || cleanEmail.split('@')[0].replace(/[._]/g, ' ');
-    const role = matchedTeacher?.role || 'GBHS Staff';
-
-    const user: TeacherUser = {
-      email: cleanEmail,
-      name,
-      role,
-      token: 'manual-token-' + Date.now(),
-      isTeacher: true,
-    };
-
-    setTeacherUser(user);
-    setCurrentView('teacher-portal');
-    soundManager.playClick();
-    return { success: true };
   };
 
   const logoutTeacher = async () => {
@@ -601,7 +620,6 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
         currentView,
         setCurrentView,
         signInWithGoogle,
-        manualTeacherVerify,
         logoutTeacher,
         syncSheetTeachers,
         isSyncingSheet,

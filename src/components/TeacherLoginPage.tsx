@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { ArrowLeft, ShieldAlert, CheckCircle2, UserCheck, Lock, ExternalLink, RefreshCw, FileSpreadsheet } from 'lucide-react';
+import { ArrowLeft, ShieldAlert, CheckCircle2, Lock, ExternalLink, RefreshCw, FileSpreadsheet, KeyRound } from 'lucide-react';
 import { useHousePoints } from '../context/HousePointsContext';
 import { SPREADSHEET_ID, SHEET_TAB, SHEET_URL } from '../services/sheetsAuth';
 
@@ -7,17 +7,14 @@ export const TeacherLoginPage: React.FC = () => {
   const {
     setCurrentView,
     signInWithGoogle,
-    manualTeacherVerify,
-    authorizedTeachers,
     isSyncingSheet,
     sheetSyncError,
   } = useHousePoints();
 
-  const [inputEmail, setInputEmail] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [isLoading, setIsLoading] = useState(false);
 
-  // Trigger Google Sign-In with Sheets scope
+  // Trigger Genuine Google Sign-In with Sheets scope
   const handleGoogleAuth = async () => {
     setIsLoading(true);
     setErrorMessage('');
@@ -27,32 +24,10 @@ export const TeacherLoginPage: React.FC = () => {
         setErrorMessage(res.error || 'Authentication denied.');
       }
     } catch (err: any) {
-      setErrorMessage(err?.message || 'Google Sign-In failed.');
+      setErrorMessage(err?.message || 'Google Sign-In failed. Please try again.');
     } finally {
       setIsLoading(false);
     }
-  };
-
-  // Quick or manual check against the TEACHERS_26 sheet roster
-  const handleVerifyEmail = (emailToVerify: string) => {
-    setIsLoading(true);
-    setErrorMessage('');
-    setTimeout(() => {
-      const res = manualTeacherVerify(emailToVerify);
-      setIsLoading(false);
-      if (!res.success) {
-        setErrorMessage(res.error || 'Authentication denied.');
-      }
-    }, 350);
-  };
-
-  const handleCustomFormSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inputEmail.trim()) {
-      setErrorMessage('Please enter your school Google email address.');
-      return;
-    }
-    handleVerifyEmail(inputEmail.trim());
   };
 
   return (
@@ -80,10 +55,10 @@ export const TeacherLoginPage: React.FC = () => {
               <Lock className="w-6 h-6 text-white" />
             </div>
             <h1 className="text-2xl font-black text-white tracking-tight font-display">
-              Teacher Scoring Login
+              Teacher Scoring Portal
             </h1>
             <p className="text-xs text-neutral-400 mt-1">
-              Authorized via GBHS Google Sheet <span className="font-mono text-neutral-200">TEACHERS_26</span>.
+              Gisborne Boys' High School · House Championship
             </p>
           </div>
 
@@ -93,7 +68,7 @@ export const TeacherLoginPage: React.FC = () => {
               <FileSpreadsheet className="w-4 h-4 text-emerald-400 shrink-0" />
               <div className="truncate">
                 <span className="font-semibold text-neutral-200 block truncate">
-                  Sheet: {SHEET_TAB}
+                  Sheet: {SHEET_TAB} (Column C)
                 </span>
                 <span className="text-[11px] text-neutral-500 font-mono truncate block">
                   ID: {SPREADSHEET_ID.substring(0, 16)}...
@@ -129,12 +104,22 @@ export const TeacherLoginPage: React.FC = () => {
             </div>
           )}
 
-          {/* Primary Action: Sign in with Google (Firebase popup + Sheet check) */}
+          {/* Primary Action: Sign in with Google (OAuth Required) */}
           <div className="space-y-4">
+            <div className="p-3.5 rounded-xl bg-neutral-950/90 border border-neutral-800/90 space-y-1.5 text-xs text-neutral-300">
+              <div className="flex items-center gap-2 text-white font-semibold">
+                <KeyRound className="w-4 h-4 text-red-500" />
+                <span>Google Account Verification Required</span>
+              </div>
+              <p className="text-[11px] text-neutral-400 leading-relaxed">
+                Sign in using your school Google account. The portal cross-checks your account email directly against <strong className="text-neutral-200">Column C</strong> of the <span className="font-mono text-neutral-200">TEACHERS_26</span> spreadsheet.
+              </p>
+            </div>
+
             <button
               onClick={handleGoogleAuth}
               disabled={isLoading || isSyncingSheet}
-              className="w-full py-3 px-4 bg-white hover:bg-neutral-100 text-neutral-900 rounded-xl text-xs font-bold transition-all shadow-md flex items-center justify-center gap-3 group"
+              className="w-full py-3.5 px-4 bg-white hover:bg-neutral-100 active:scale-[0.99] text-neutral-900 rounded-xl text-xs font-bold transition-all shadow-lg flex items-center justify-center gap-3 group cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
             >
               {isLoading || isSyncingSheet ? (
                 <RefreshCw className="w-4 h-4 animate-spin text-neutral-700" />
@@ -158,71 +143,17 @@ export const TeacherLoginPage: React.FC = () => {
                   />
                 </svg>
               )}
-              <span>Sign In with Google</span>
+              <span>{isLoading ? 'Verifying with Google...' : 'Sign In with Google Account'}</span>
             </button>
 
-            {/* Quick-test verified teacher accounts from TEACHERS_26 */}
-            <div className="pt-2">
-              <span className="block text-[11px] font-bold uppercase tracking-wider text-neutral-400 mb-2">
-                Or select verified staff on TEACHERS_26
-              </span>
-              <div className="space-y-2">
-                {authorizedTeachers.slice(0, 3).map((teacher) => (
-                  <button
-                    key={teacher.email}
-                    onClick={() => handleVerifyEmail(teacher.email)}
-                    disabled={isLoading}
-                    className="w-full p-2.5 rounded-xl bg-neutral-950 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 flex items-center justify-between text-left transition-colors"
-                  >
-                    <div className="truncate">
-                      <span className="text-xs font-bold text-white block truncate">
-                        {teacher.name}
-                      </span>
-                      <span className="text-[11px] text-neutral-400 font-mono truncate block">
-                        {teacher.email}
-                      </span>
-                    </div>
-                    <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-neutral-900 text-emerald-400 border border-neutral-800 shrink-0">
-                      On Sheet
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Custom Google Email Test Input */}
-            <div className="pt-2 border-t border-neutral-800">
-              <form onSubmit={handleCustomFormSubmit} className="space-y-2">
-                <label className="block text-[11px] text-neutral-400">
-                  Verify another email against TEACHERS_26:
-                </label>
-                <div className="flex items-center gap-2">
-                  <input
-                    type="email"
-                    value={inputEmail}
-                    onChange={(e) => setInputEmail(e.target.value)}
-                    placeholder="email@gisboyshigh.net"
-                    className="flex-1 bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-2 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-red-600"
-                  />
-                  <button
-                    type="submit"
-                    disabled={isLoading}
-                    className="px-3 py-2 bg-red-700 hover:bg-red-600 text-white rounded-lg text-xs font-bold transition-colors shrink-0"
-                  >
-                    Check
-                  </button>
-                </div>
-              </form>
-            </div>
-
             {/* Security Explanation */}
-            <div className="pt-3 border-t border-neutral-800 text-[11px] text-neutral-400 space-y-1">
+            <div className="pt-3 border-t border-neutral-800 text-[11px] text-neutral-400 space-y-1.5">
               <div className="flex items-center gap-1.5 text-neutral-300 font-medium">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                <span>Strict Google Sheet Authorization</span>
+                <span>Strict Column C Authorization</span>
               </div>
               <p className="text-neutral-400 leading-normal pl-5">
-                Only users whose email appears in the <code className="text-neutral-200">TEACHERS_26</code> tab of the official school spreadsheet can log in to award house points.
+                Only authenticated Google users whose email matches an entry in Column C of <code className="text-neutral-200">TEACHERS_26</code> can record points. All unauthorized logins are rejected and signed out automatically.
               </p>
             </div>
           </div>

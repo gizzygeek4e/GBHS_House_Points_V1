@@ -68,56 +68,33 @@ export const logoutGoogle = async () => {
 
 /**
  * Parses raw 2D array of rows from Google Sheets into structured TeacherAccount items.
+ * Per GBHS specification: Column C (index 2) contains the verified Google account emails.
+ * Column A (index 0) contains staff names.
+ * Column B (index 1) contains staff roles / houses.
  */
 export const parseTeacherRows = (rows: any[][]): TeacherAccount[] => {
   if (!rows || rows.length === 0) return [];
 
-  // Identify column indices from header row
-  let headerIndex = -1;
-  let emailCol = -1;
-  let nameCol = -1;
-  let roleCol = -1;
-
-  for (let r = 0; r < Math.min(rows.length, 5); r++) {
-    const row = rows[r];
-    for (let c = 0; c < row.length; c++) {
-      const val = String(row[c] || '').toLowerCase().trim();
-      if (val.includes('email') || val.includes('e-mail') || val.includes('mail')) {
-        emailCol = c;
-        headerIndex = r;
-      }
-      if (val.includes('name') || val.includes('teacher') || val.includes('staff')) {
-        nameCol = c;
-        headerIndex = r;
-      }
-      if (val.includes('role') || val.includes('house') || val.includes('position') || val.includes('title')) {
-        roleCol = c;
-      }
-    }
-    if (emailCol !== -1) break;
-  }
-
-  // If no header with "email" was explicitly found, infer from data where cells contain '@'
-  if (emailCol === -1) {
-    for (let r = 0; r < rows.length; r++) {
-      for (let c = 0; c < rows[r].length; c++) {
-        const val = String(rows[r][c] || '').trim();
-        if (val.includes('@') && val.includes('.')) {
-          emailCol = c;
-          headerIndex = Math.max(0, r - 1);
-          break;
-        }
-      }
-      if (emailCol !== -1) break;
+  // Determine starting row: check if row 0 has header labels
+  let startRow = 0;
+  if (rows.length > 0) {
+    const firstRowStr = rows[0].map((c) => String(c || '').toLowerCase()).join(' ');
+    if (
+      firstRowStr.includes('name') ||
+      firstRowStr.includes('email') ||
+      firstRowStr.includes('e-mail') ||
+      firstRowStr.includes('mail') ||
+      firstRowStr.includes('staff') ||
+      firstRowStr.includes('teacher') ||
+      firstRowStr.includes('account') ||
+      firstRowStr.includes('google') ||
+      firstRowStr.includes('role') ||
+      firstRowStr.includes('house')
+    ) {
+      startRow = 1;
     }
   }
 
-  // Default fallbacks if columns not explicitly labeled
-  if (emailCol === -1) emailCol = 0;
-  if (nameCol === -1) nameCol = emailCol === 0 ? 1 : 0;
-  if (roleCol === -1) roleCol = 2;
-
-  const startRow = headerIndex >= 0 ? headerIndex + 1 : 0;
   const teachers: TeacherAccount[] = [];
   const seenEmails = new Set<string>();
 
@@ -125,15 +102,31 @@ export const parseTeacherRows = (rows: any[][]): TeacherAccount[] => {
     const row = rows[r];
     if (!row || row.length === 0) continue;
 
-    const emailRaw = String(row[emailCol] || '').trim().toLowerCase();
-    // Validate email format
-    if (!emailRaw || !emailRaw.includes('@') || emailRaw.includes('email') || seenEmails.has(emailRaw)) {
+    // Primary: Column C is index 2 (A=0, B=1, C=2) - Verified Google Account Email
+    let emailRaw = String(row[2] || '').trim().toLowerCase();
+
+    // Fallback: If Column C is empty in a row, inspect other cells for an email pattern
+    if (!emailRaw || !emailRaw.includes('@')) {
+      for (let c = 0; c < row.length; c++) {
+        const cell = String(row[c] || '').trim().toLowerCase();
+        if (cell.includes('@') && cell.includes('.') && !cell.includes('email') && !cell.includes('google')) {
+          emailRaw = cell;
+          break;
+        }
+      }
+    }
+
+    // Must be a valid email format and not a duplicate
+    if (!emailRaw || !emailRaw.includes('@') || !emailRaw.includes('.') || emailRaw.includes('email') || seenEmails.has(emailRaw)) {
       continue;
     }
 
     seenEmails.add(emailRaw);
-    const rawName = row[nameCol] ? String(row[nameCol]).trim() : '';
-    const rawRole = row[roleCol] ? String(row[roleCol]).trim() : '';
+
+    // Column A is Name (index 0)
+    const rawName = row[0] ? String(row[0]).trim() : '';
+    // Column B is Role / Department / House (index 1)
+    const rawRole = row[1] ? String(row[1]).trim() : (row[3] ? String(row[3]).trim() : '');
 
     const name = rawName || emailRaw.split('@')[0].replace(/[._]/g, ' ');
     const role = rawRole || 'GBHS Staff';

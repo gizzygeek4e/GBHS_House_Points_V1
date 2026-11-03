@@ -4,16 +4,13 @@ import {
   ShieldAlert,
   CheckCircle2,
   Lock,
-  ExternalLink,
   RefreshCw,
-  FileSpreadsheet,
   KeyRound,
   Info,
   Globe,
   UserCheck,
 } from 'lucide-react';
 import { useHousePoints } from '../context/HousePointsContext';
-import { SPREADSHEET_ID, SHEET_TAB, SHEET_URL } from '../services/sheetsAuth';
 
 import gbhsHeaderLogo from '../assets/gbhs_header_logo.png';
 
@@ -21,8 +18,6 @@ export const TeacherLoginPage: React.FC = () => {
   const {
     setCurrentView,
     signInWithGoogle,
-    isSyncingSheet,
-    sheetSyncError,
     authorizedTeachers,
   } = useHousePoints();
 
@@ -88,29 +83,22 @@ export const TeacherLoginPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Google Sheet Source Banner */}
+          {/* Cloud Firestore Directory Banner */}
           <div className="mb-5 p-3 rounded-xl bg-neutral-950 border border-neutral-800 flex items-center justify-between text-xs">
-            <div className="flex items-center gap-2 truncate pr-2">
-              <FileSpreadsheet className="w-4 h-4 text-emerald-400 shrink-0" />
+            <div className="flex items-center gap-2.5 truncate pr-2">
+              <div className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse shrink-0" />
               <div className="truncate">
                 <span className="font-semibold text-neutral-200 block truncate">
-                  Sheet: {SHEET_TAB} (Column C)
+                  Cloud Firestore Staff Database
                 </span>
-                <span className="text-[11px] text-neutral-500 font-mono truncate block">
-                  ID: {SPREADSHEET_ID.substring(0, 16)}...
+                <span className="text-[11px] text-neutral-400 font-mono truncate block">
+                  {authorizedTeachers.length} Authorized Teacher Accounts
                 </span>
               </div>
             </div>
-            <a
-              href={SHEET_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="flex items-center gap-1 text-[11px] font-semibold text-red-400 hover:text-red-300 transition-colors shrink-0"
-              title="Open Google Sheet in new tab"
-            >
-              <span>View Sheet</span>
-              <ExternalLink className="w-3 h-3" />
-            </a>
+            <span className="text-[10px] font-bold text-emerald-400 bg-emerald-950/80 px-2 py-0.5 rounded border border-emerald-800/60 shrink-0">
+              Live Cloud Sync
+            </span>
           </div>
 
           {/* Error Message Callout */}
@@ -124,12 +112,6 @@ export const TeacherLoginPage: React.FC = () => {
             </div>
           )}
 
-          {sheetSyncError && (
-            <div className="mb-4 text-[11px] text-amber-400/90 bg-amber-950/40 p-2.5 rounded-lg border border-amber-800/40">
-              Note: {sheetSyncError}. Using cached authorized teacher roster.
-            </div>
-          )}
-
           {/* Diagnostics Accordion */}
           {showDiagnostics && (
             <div className="mb-5 p-3.5 rounded-xl bg-neutral-950 border border-neutral-800 text-xs space-y-2 text-neutral-400">
@@ -140,8 +122,8 @@ export const TeacherLoginPage: React.FC = () => {
               <div className="space-y-1 text-[11px] font-mono">
                 <p>Host: <span className="text-neutral-200">{currentHost}</span></p>
                 <p>SuperAdmin: <span className="text-emerald-300">hermanf@gisboyshigh.net</span></p>
-                <p>Known Teachers: <span className="text-neutral-200">{authorizedTeachers.length} accounts</span></p>
-                <p>Sheet Tab: <span className="text-neutral-200">{SHEET_TAB}</span></p>
+                <p>Authorized Staff: <span className="text-neutral-200">{authorizedTeachers.length} accounts</span></p>
+                <p>Sync Engine: <span className="text-emerald-400 font-bold">Cloud Firestore</span></p>
               </div>
             </div>
           )}
@@ -154,17 +136,17 @@ export const TeacherLoginPage: React.FC = () => {
                 <span>Google Account Verification</span>
               </div>
               <p className="text-[11px] text-neutral-400 leading-relaxed">
-                Sign in with your school Google account (<strong className="text-neutral-200">@gisboyshigh.net</strong>). Access is granted to verified accounts listed in <strong className="text-neutral-200">Column C</strong> of the <span className="font-mono text-neutral-200">TEACHERS_26</span> sheet.
+                Sign in with your school Google account (<strong className="text-neutral-200">@gisboyshigh.net</strong>). Access is verified directly against the Cloud Firestore Teacher Database.
               </p>
             </div>
 
             <button
               type="button"
               onClick={handleGoogleAuth}
-              disabled={isLoading || isSyncingSheet}
+              disabled={isLoading}
               className="w-full py-3.5 px-4 bg-white hover:bg-neutral-100 active:scale-[0.99] text-neutral-900 rounded-xl text-xs font-bold transition-all shadow-lg flex items-center justify-center gap-3 group cursor-pointer disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              {isLoading || isSyncingSheet ? (
+              {isLoading ? (
                 <RefreshCw className="w-4 h-4 animate-spin text-neutral-700" />
               ) : (
                 <svg className="w-4 h-4" viewBox="0 0 24 24">
@@ -204,10 +186,10 @@ export const TeacherLoginPage: React.FC = () => {
             <div className="pt-3 border-t border-neutral-800 text-[11px] text-neutral-400 space-y-1.5">
               <div className="flex items-center gap-1.5 text-neutral-300 font-medium">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
-                <span>Strict Column C Authorization</span>
+                <span>Verified Cloud Staff Directory</span>
               </div>
               <p className="text-neutral-400 leading-normal pl-5">
-                Only authenticated Google users whose email matches an entry in Column C of <code className="text-neutral-200">TEACHERS_26</code> can record points.
+                Only authenticated Google users registered in the Cloud Firestore Staff Directory can record points. Deans can add, modify, or remove teachers in the portal.
               </p>
             </div>
           </div>

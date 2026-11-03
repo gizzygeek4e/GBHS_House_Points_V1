@@ -4,6 +4,7 @@ import { useHousePoints } from '../context/HousePointsContext';
 import { SchoolTerm } from '../types';
 
 import gbhsHeaderLogo from '../assets/gbhs_header_logo.png';
+import { HouseCrestImage } from './HouseCrestImage';
 
 export const AssemblyIndexView: React.FC = () => {
   const {
@@ -129,8 +130,8 @@ export const AssemblyIndexView: React.FC = () => {
         {/* 4 House Stadium Columns */}
         <div className="w-full max-w-6xl grid grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6 lg:gap-8 items-end h-[60vh] sm:h-[66vh] max-h-[660px]">
           {houses.map((house) => {
-            // Scale bar height between 26% (so embedded logo always fits at top) and 100%
-            const percentage = maxPoints > 0 ? Math.max((house.currentTotal / maxPoints) * 100, 26) : 26;
+            // Scale bar height between 32% (so responsive full-width logo with 10px padding always fits at top) and 100%
+            const percentage = maxPoints > 0 ? Math.max((house.currentTotal / maxPoints) * 100, 32) : 32;
             const isFirst = house.rank === 1;
 
             return (
@@ -161,10 +162,10 @@ export const AssemblyIndexView: React.FC = () => {
                 </div>
 
                 {/* Vertical Stadium Pillar Track */}
-                <div className="w-full max-w-[170px] bg-neutral-950/80 rounded-t-2xl border-2 border-neutral-800/80 p-1 flex flex-col justify-end h-64 sm:h-80 lg:h-96 shadow-2xl overflow-hidden">
+                <div className="w-full max-w-[190px] sm:max-w-[215px] lg:max-w-[235px] bg-neutral-950/80 rounded-t-2xl border-2 border-neutral-800/80 p-1 flex flex-col justify-end h-64 sm:h-80 lg:h-96 shadow-2xl overflow-hidden">
                   {/* Animated Rising Bar Pillar */}
                   <div
-                    className={`w-full rounded-xl bg-gradient-to-t ${house.barGradient} transition-all duration-1000 ease-out relative flex flex-col items-center justify-start overflow-hidden pt-2 sm:pt-3 px-1`}
+                    className={`w-full rounded-xl bg-gradient-to-t ${house.barGradient} transition-all duration-1000 ease-out relative flex flex-col items-center justify-start overflow-hidden pt-1`}
                     style={{
                       height: `${percentage}%`,
                       boxShadow: `0 0 28px ${house.primaryColor}65`,
@@ -173,14 +174,13 @@ export const AssemblyIndexView: React.FC = () => {
                     {/* Top glass highlight bar */}
                     <div className="absolute inset-x-0 top-0 h-1.5 sm:h-2 bg-white/40" />
 
-                    {/* EMBEDDED HOUSE LOGO — Aligned directly with the TOP of each bar without background */}
-                    <div className="w-16 h-16 sm:w-22 sm:h-22 lg:w-26 lg:h-26 shrink-0 relative z-10 transition-transform duration-300 group-hover:scale-110 flex items-center justify-center">
-                      <img
+                    {/* EMBEDDED HOUSE LOGO — Responsive width to the full width of the bar with 10px padding */}
+                    <div className="w-full p-[10px] relative z-10 flex items-center justify-center shrink-0">
+                      <HouseCrestImage
+                        houseId={house.id}
+                        houseName={house.name}
                         src={house.crest}
-                        alt={house.name}
-                        className="w-full h-full object-contain filter drop-shadow-[0_4px_14px_rgba(0,0,0,0.65)] select-none pointer-events-none"
-                        loading="eager"
-                        decoding="async"
+                        className="w-full h-auto object-contain filter drop-shadow-[0_4px_16px_rgba(0,0,0,0.7)] select-none pointer-events-none transition-transform duration-300 group-hover:scale-105"
                       />
                     </div>
                   </div>
@@ -188,7 +188,7 @@ export const AssemblyIndexView: React.FC = () => {
 
                 {/* Base Podium Banner */}
                 <div
-                  className="w-full max-w-[170px] py-3 text-center border-t-4 bg-neutral-950 rounded-b-xl shadow-lg"
+                  className="w-full max-w-[190px] sm:max-w-[215px] lg:max-w-[235px] py-3 text-center border-t-4 bg-neutral-950 rounded-b-xl shadow-lg"
                   style={{ borderTopColor: house.borderStroke }}
                 >
                   <h2 className="font-extrabold text-sm sm:text-base text-white font-display truncate px-1">

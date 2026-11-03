@@ -9,6 +9,8 @@ import {
   onSnapshot,
   writeBatch,
   query,
+  where,
+  getDocs,
   orderBy,
 } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType, testFirestoreConnection } from '../services/firebase';
@@ -18,7 +20,6 @@ import { INITIAL_HOUSES, INITIAL_POINT_EVENTS, INITIAL_AUTHORIZED_TEACHERS } fro
 import { soundManager } from '../utils/audio';
 import {
   signInWithGoogleAccount,
-  fetchTeachersFromSheet,
   logoutGoogle,
   getCachedAccessToken,
   setCachedAccessToken,
@@ -43,14 +44,12 @@ interface HousePointsContextType {
   authorizedTeachers: TeacherAccount[];
   updateAuthorizedTeachers: (teachers: TeacherAccount[]) => Promise<void>;
   addAuthorizedTeacher: (teacher: TeacherAccount) => Promise<void>;
+  editAuthorizedTeacher: (email: string, updated: Partial<TeacherAccount>) => Promise<void>;
+  removeAuthorizedTeacher: (email: string) => Promise<void>;
   currentView: AppView;
   setCurrentView: (view: AppView) => void;
   signInWithGoogle: () => Promise<{ success: boolean; error?: string }>;
   logoutTeacher: () => void;
-  syncSheetTeachers: () => Promise<void>;
-  isSyncingSheet: boolean;
-  sheetSyncError: string | null;
-  sheetLastSynced: number | null;
   addPoints: (data: Omit<PointEvent, 'id' | 'timestamp'>) => Promise<void>;
   deletePointEvent: (id: string) => Promise<void>;
   editPointEvent: (id: string, updated: Partial<PointEvent>) => Promise<void>;
@@ -103,11 +102,6 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     } catch {}
     return null;
   });
-
-  // Google Sheet Sync Status
-  const [isSyncingSheet, setIsSyncingSheet] = useState(false);
-  const [sheetSyncError, setSheetSyncError] = useState<string | null>(null);
-  const [sheetLastSynced, setSheetLastSynced] = useState<number | null>(null);
 
   // Filters
   const [selectedTerm, setSelectedTerm] = useState<SchoolTerm>('All Year');
@@ -217,7 +211,11 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
         if (!snapshot.empty) {
           const liveTeachers: TeacherAccount[] = [];
           snapshot.forEach((d) => {
-            liveTeachers.push(d.data() as TeacherAccount);
+            const data = d.data() as TeacherAccount;
+            liveTeachers.push({
+              ...data,
+              id: d.id,
+            });
           });
           setAuthorizedTeachers(liveTeachers);
         } else {
@@ -372,46 +370,91 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     await updateAuthorizedTeachers(updated);
   };
 
-  // Sync teachers directly from Google Sheet (tab TEACHERS_26) if token is available
-  const syncSheetTeachers = async () => {
-    const token = getCachedAccessToken();
-    if (!token) {
-      setSheetSyncError('No Google Sheets access token available. Use manual import or sign in with Google permissions.');
-      return;
-    }
+  // Edit / Modify existing teacher details in Cloud Firestore
+  const editAuthorizedTeacher = async (email: string, updated: Partial<TeacherAccount>) => {
+    const cleanEmail = email.toLowerCase().trim();
+    const docId = cleanEmail.replace(/[^a-zA-Z0-9_-]/g, '_');
 
-    setIsSyncingSheet(true);
-    setSheetSyncError(null);
+    // Update state in memory
+    const nextTeachers = authorizedTeachers.map((t) =>
+      t.email.toLowerCase() === cleanEmail ? { ...t, ...updated } : t
+    );
+    setAuthorizedTeachers(nextTeachers);
 
     try {
-      const sheetTeachers = await fetchTeachersFromSheet(token);
-      if (sheetTeachers && sheetTeachers.length > 0) {
-        await updateAuthorizedTeachers(sheetTeachers);
-        setSheetLastSynced(Date.now());
+      const docRef = doc(db, 'authorizedTeachers', docId);
+      await updateDoc(docRef, {
+        ...updated,
+        updatedAt: Date.now(),
+      });
+    } catch (err) {
+      console.error('Error updating teacher in Firestore:', err);
+      throw err;
+    }
+  };
+
+  // Remove teacher from Cloud Firestore database
+  const removeAuthorizedTeacher = async (email: string) => {
+    const cleanEmail = email.toLowerCase().trim();
+    if (cleanEmail === 'hermanf@gisboyshigh.net') {
+      throw new Error('The SuperAdmin account (hermanf@gisboyshigh.net) cannot be removed.');
+    }
+
+    const targetTeacher = authorizedTeachers.find((t) => t.email.toLowerCase() === cleanEmail);
+    const knownDocId = targetTeacher?.id;
+    const computedDocId = cleanEmail.replace(/[^a-zA-Z0-9_-]/g, '_');
+
+    // Optimistically update memory and localStorage cache
+    const nextTeachers = authorizedTeachers.filter((t) => t.email.toLowerCase() !== cleanEmail);
+    setAuthorizedTeachers(nextTeachers);
+    try {
+      localStorage.setItem(STORAGE_SHEET_TEACHERS_KEY, JSON.stringify(nextTeachers));
+    } catch {}
+
+    try {
+      // 1. Delete by known doc ID if available
+      if (knownDocId) {
+        try {
+          await deleteDoc(doc(db, 'authorizedTeachers', knownDocId));
+        } catch (e) {
+          console.warn('Delete by knownDocId note:', e);
+        }
       }
-    } catch (err: any) {
-      console.warn('Sheet sync warning:', err);
-      setSheetSyncError(err?.message || 'Unable to sync spreadsheet rows.');
-    } finally {
-      setIsSyncingSheet(false);
+
+      // 2. Delete by computed doc ID
+      try {
+        await deleteDoc(doc(db, 'authorizedTeachers', computedDocId));
+      } catch (e) {
+        console.warn('Delete by computedDocId note:', e);
+      }
+
+      // 3. Query and delete any docs with matching email field
+      const q = query(collection(db, 'authorizedTeachers'), where('email', '==', cleanEmail));
+      const querySnapshot = await getDocs(q);
+      if (!querySnapshot.empty) {
+        const batch = writeBatch(db);
+        querySnapshot.forEach((docItem) => {
+          batch.delete(docItem.ref);
+        });
+        await batch.commit();
+      }
+    } catch (err) {
+      console.error('Error removing teacher from Firestore:', err);
+      handleFirestoreError(err, OperationType.DELETE, `authorizedTeachers/${computedDocId}`);
+      throw err;
     }
   };
 
   /**
    * Primary Teacher Google Login Flow:
    * 1. Signs in via genuine Google OAuth popup using standard profile and email scopes.
-   *    (Avoids Google Workspace unverified app blocking for @gisboyshigh.net domain accounts).
-   * 2. Checks user's verified Google account email against Column C of the TEACHERS_26 sheet roster.
+   * 2. Checks user's verified Google account email against the Cloud Firestore authorizedTeachers database.
    * 3. hermanf@gisboyshigh.net is recognized as Dean & SuperAdmin.
-   * 4. Only allows access if the signed-in user's email matches an email in Column C.
    */
   const signInWithGoogle = async (): Promise<{ success: boolean; error?: string }> => {
-    setIsSyncingSheet(true);
-    setSheetSyncError(null);
-
     try {
       // 1. Google OAuth Sign-In Popup with standard profile/email permissions
-      const { user, accessToken } = await signInWithGoogleAccount(false);
+      const { user } = await signInWithGoogleAccount(false);
       const userEmail = (user.email || '').trim().toLowerCase();
 
       if (!userEmail) {
@@ -430,25 +473,7 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
         }
       });
 
-      // Attempt optional sheet sync if accessToken was returned
-      if (accessToken) {
-        try {
-          const fetched = await fetchTeachersFromSheet(accessToken);
-          if (fetched && fetched.length > 0) {
-            await updateAuthorizedTeachers(fetched);
-            setSheetLastSynced(Date.now());
-            fetched.forEach((f) => {
-              if (!allKnown.some((t) => t.email.toLowerCase() === f.email.toLowerCase())) {
-                allKnown.push(f);
-              }
-            });
-          }
-        } catch (sheetErr: any) {
-          console.warn('Sheet fetch note (using cached roster):', sheetErr?.message);
-        }
-      }
-
-      // 3. Check if user's Google email is registered in Column C of TEACHERS_26
+      // 3. Check if user's Google email is registered in the Cloud Firestore Teacher Database
       const matchedTeacher = allKnown.find(
         (t) => t.email.toLowerCase() === userEmail
       );
@@ -466,7 +491,7 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
         return {
           success: false,
-          error: `Access Denied: You signed in as "${userEmail}". Only teachers whose Google email is in Column C of the TEACHERS_26 Google Sheet are authorized to award points. If you have another Google account, please click "Sign In with Google Account" and select your school email.`,
+          error: `Access Denied: You signed in as "${userEmail}". This Google account is not yet on the verified staff roster. Please ask Herman (Dean of Houses) to add your account in the Teacher Portal.`,
         };
       }
 
@@ -478,7 +503,6 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
         name: teacherName,
         role: teacherRole,
         picture: user.photoURL || undefined,
-        token: accessToken,
         isTeacher: true,
       };
 
@@ -507,8 +531,6 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
         success: false,
         error: friendlyError,
       };
-    } finally {
-      setIsSyncingSheet(false);
     }
   };
 
@@ -659,14 +681,12 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
         authorizedTeachers,
         updateAuthorizedTeachers,
         addAuthorizedTeacher,
+        editAuthorizedTeacher,
+        removeAuthorizedTeacher,
         currentView,
         setCurrentView,
         signInWithGoogle,
         logoutTeacher,
-        syncSheetTeachers,
-        isSyncingSheet,
-        sheetSyncError,
-        sheetLastSynced,
         addPoints,
         deletePointEvent,
         editPointEvent,

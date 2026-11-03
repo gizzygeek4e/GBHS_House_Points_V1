@@ -49,6 +49,10 @@ service cloud.firestore {
         && (!('updatedAt' in data) || (data.updatedAt is number));
     }
 
+    function isValidTeacherId(id) {
+      return id is string && id.size() > 0 && id.size() <= 200 && id.matches('^[a-zA-Z0-9_\\-@.]+$');
+    }
+
     // Point Events Collection:
     // Public read for assembly hall screens, mobile phones, and community leaderboard.
     // Writes are validated strictly by schema and payload boundaries.
@@ -62,10 +66,11 @@ service cloud.firestore {
     }
 
     // Authorized Teachers Collection:
-    // Holds the directory of school teachers verified against the TEACHERS_26 roster.
+    // Holds the directory of school teachers synced directly with Cloud Firestore.
     match /authorizedTeachers/{teacherId} {
       allow read: if true;
-      allow write: if isValidId(teacherId) && isValidAuthorizedTeacher(request.resource.data);
+      allow create, update: if isValidTeacherId(teacherId) && isValidAuthorizedTeacher(request.resource.data);
+      allow delete: if isValidTeacherId(teacherId);
     }
   }
 }

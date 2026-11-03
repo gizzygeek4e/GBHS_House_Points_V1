@@ -4,7 +4,6 @@ import {
   PlusCircle,
   ListOrdered,
   Layers,
-  UserCheck,
   Settings,
   LogOut,
   Download,
@@ -16,15 +15,18 @@ import {
   AlertTriangle,
   RotateCcw,
   Shield,
-  FileSpreadsheet,
-  ExternalLink,
-  RefreshCw,
+  Pencil,
+  UserPlus,
+  Database,
+  ShieldCheck,
+  X,
 } from 'lucide-react';
 import { useHousePoints } from '../context/HousePointsContext';
-import { HouseId, PointCategory, SchoolTerm } from '../types';
-import { SPREADSHEET_ID, SHEET_TAB, SHEET_URL, parseTeacherCsv } from '../services/sheetsAuth';
+import { HouseId, PointCategory, SchoolTerm, TeacherAccount, PointEvent } from '../types';
+import { parseTeacherCsv } from '../services/sheetsAuth';
 import gbhsHeaderLogo from '../assets/gbhs_header_logo.png';
 import gbhsCrest from '../assets/gbhs_crest.png';
+import { HouseCrestImage } from './HouseCrestImage';
 
 export const TeacherPortalDashboard: React.FC = () => {
   const {
@@ -40,10 +42,8 @@ export const TeacherPortalDashboard: React.FC = () => {
     authorizedTeachers,
     updateAuthorizedTeachers,
     addAuthorizedTeacher,
-    syncSheetTeachers,
-    isSyncingSheet,
-    sheetSyncError,
-    sheetLastSynced,
+    editAuthorizedTeacher,
+    removeAuthorizedTeacher,
     resetToDefaultData,
     clearAllPoints,
     triggerConfetti,
@@ -70,7 +70,7 @@ export const TeacherPortalDashboard: React.FC = () => {
   // Selected house for detailed profile in "houses" tab
   const [activeHouseProfile, setActiveHouseProfile] = useState<HouseId>('tumatauenga');
 
-  // Teacher Roster Management State
+  // Teacher Management State (Cloud Firestore)
   const [showAddTeacherModal, setShowAddTeacherModal] = useState(false);
   const [newTeacherName, setNewTeacherName] = useState('');
   const [newTeacherEmail, setNewTeacherEmail] = useState('');
@@ -78,6 +78,24 @@ export const TeacherPortalDashboard: React.FC = () => {
   const [pasteText, setPasteText] = useState('');
   const [importMode, setImportMode] = useState<'single' | 'paste'>('single');
   const [rosterNotice, setRosterNotice] = useState<string | null>(null);
+
+  // Edit Teacher Modal State
+  const [editingTeacher, setEditingTeacher] = useState<TeacherAccount | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editRole, setEditRole] = useState('');
+
+  // Delete Teacher Modal State (In-app modal avoiding browser window.confirm blocks)
+  const [teacherToDelete, setTeacherToDelete] = useState<TeacherAccount | null>(null);
+  const [isDeletingTeacher, setIsDeletingTeacher] = useState(false);
+
+  // Delete Ledger Event Modal State
+  const [eventToDelete, setEventToDelete] = useState<PointEvent | null>(null);
+  const [isDeletingEvent, setIsDeletingEvent] = useState(false);
+
+  // Settings Confirmation Modals State
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [settingsNotice, setSettingsNotice] = useState<string | null>(null);
 
   const quickEventTitles = [
     'Inter-House Athletics 100m Sprint',
@@ -244,8 +262,8 @@ export const TeacherPortalDashboard: React.FC = () => {
                 : 'bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800 hover:border-neutral-700'
             }`}
           >
-            <UserCheck className="w-3.5 h-3.5" />
-            <span>Google Sheet Roster ({authorizedTeachers.length})</span>
+            <Database className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Staff Directory ({authorizedTeachers.length})</span>
           </button>
 
           <button
@@ -539,11 +557,11 @@ export const TeacherPortalDashboard: React.FC = () => {
                           className="w-11 h-11 p-1 rounded-xl bg-neutral-950 border shrink-0"
                           style={{ borderColor: house?.borderStroke }}
                         >
-                          <img
+                          <HouseCrestImage
+                            houseId={ev.houseId}
+                            houseName={house?.name || ev.houseId}
                             src={house?.crest}
-                            alt={house?.name}
                             className="w-full h-full object-contain"
-                            loading="eager"
                           />
                         </div>
 
@@ -596,13 +614,10 @@ export const TeacherPortalDashboard: React.FC = () => {
                         </span>
 
                         <button
-                          onClick={() => {
-                            if (window.confirm(`Delete entry "${ev.title}"?`)) {
-                              deletePointEvent(ev.id);
-                            }
-                          }}
-                          className="p-1.5 text-neutral-500 hover:text-red-400 hover:bg-neutral-800 rounded-lg transition-colors"
+                          onClick={() => setEventToDelete(ev)}
+                          className="p-1.5 text-neutral-500 hover:text-red-400 hover:bg-neutral-800 rounded-lg transition-colors cursor-pointer"
                           title="Delete entry"
+                          aria-label="Delete entry"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -640,9 +655,10 @@ export const TeacherPortalDashboard: React.FC = () => {
                         className="w-11 h-11 p-1 rounded-xl bg-neutral-900 border shrink-0"
                         style={{ borderColor: house.borderStroke }}
                       >
-                        <img
+                        <HouseCrestImage
+                          houseId={house.id}
+                          houseName={house.name}
                           src={house.crest}
-                          alt={house.name}
                           className="w-full h-full object-contain"
                         />
                       </div>
@@ -685,9 +701,10 @@ export const TeacherPortalDashboard: React.FC = () => {
                           className="w-16 h-16 p-1.5 rounded-2xl bg-neutral-950 border-2 shrink-0 shadow-lg"
                           style={{ borderColor: house.borderStroke }}
                         >
-                          <img
+                          <HouseCrestImage
+                            houseId={house.id}
+                            houseName={house.name}
                             src={house.crest}
-                            alt={house.name}
                             className="w-full h-full object-contain"
                           />
                         </div>
@@ -781,7 +798,7 @@ export const TeacherPortalDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* TAB 4: GOOGLE SHEET ROSTER (TEACHERS_26) */}
+        {/* TAB 4: CLOUD FIRESTORE STAFF DIRECTORY */}
         {activeTab === 'teachers' && (
           <div className="max-w-3xl mx-auto space-y-6">
             <div className="bg-neutral-900/80 border border-neutral-800 rounded-2xl p-6 sm:p-8">
@@ -789,138 +806,159 @@ export const TeacherPortalDashboard: React.FC = () => {
                 <div>
                   <div className="flex items-center gap-2 mb-1">
                     <span className="text-xs font-bold uppercase tracking-wider text-emerald-400 flex items-center gap-1.5">
-                      <FileSpreadsheet className="w-3.5 h-3.5" />
-                      Google Sheet Integration
+                      <Database className="w-3.5 h-3.5" />
+                      Cloud Firestore Directory
                     </span>
                   </div>
                   <h2 className="text-xl font-bold text-white font-display">
-                    Authorized Teachers Roster ({SHEET_TAB})
+                    Authorized Teachers & Staff
                   </h2>
                   <p className="text-xs text-neutral-400 mt-0.5">
-                    Only staff with a verified Google account email in <strong className="text-neutral-300">Column C</strong> of this Google Sheet can log in to award house points.
+                    Directly synced with Cloud Firestore. Only verified Google accounts listed below can log in to award house points.
                   </p>
                 </div>
 
                 <div className="flex items-center gap-2">
-                  <a
-                    href={SHEET_URL}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-neutral-950 hover:bg-neutral-800 border border-neutral-800 text-xs text-neutral-300 hover:text-white transition-colors"
+                  <button
+                    onClick={() => {
+                      setRosterNotice(null);
+                      setImportMode('single');
+                      setShowAddTeacherModal(true);
+                    }}
+                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-red-700 hover:bg-red-600 text-white text-xs font-bold transition-colors shadow-sm cursor-pointer"
                   >
-                    <span>Open Sheet</span>
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
+                    <UserPlus className="w-3.5 h-3.5" />
+                    <span>Add Teacher</span>
+                  </button>
 
                   <button
                     onClick={() => {
                       setRosterNotice(null);
+                      setImportMode('paste');
                       setShowAddTeacherModal(true);
                     }}
                     className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-bold transition-colors border border-neutral-700 cursor-pointer"
                   >
                     <Plus className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Manage Teachers</span>
-                  </button>
-
-                  <button
-                    onClick={syncSheetTeachers}
-                    disabled={isSyncingSheet}
-                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-red-700 hover:bg-red-600 text-white text-xs font-bold transition-colors shadow-sm cursor-pointer disabled:opacity-60"
-                  >
-                    <RefreshCw className={`w-3.5 h-3.5 ${isSyncingSheet ? 'animate-spin' : ''}`} />
-                    <span>Sync from Sheet</span>
+                    <span>Bulk Paste List</span>
                   </button>
                 </div>
               </div>
 
               {/* Notice Message */}
               {rosterNotice && (
-                <div className="mb-4 p-3 rounded-xl bg-emerald-950/80 border border-emerald-800 text-emerald-200 text-xs flex items-center gap-2">
+                <div className="mb-4 p-3 rounded-xl bg-emerald-950/80 border border-emerald-800 text-emerald-200 text-xs flex items-center gap-2 animate-fadeIn">
                   <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
                   <span>{rosterNotice}</span>
                 </div>
               )}
 
-              {/* Sheet Metadata Box */}
+              {/* Cloud Database Status Card */}
               <div className="mb-6 p-4 rounded-xl bg-neutral-950 border border-neutral-800 text-xs space-y-2">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-neutral-400">
-                  <span>
-                    Spreadsheet ID: <code className="text-neutral-200 font-mono">{SPREADSHEET_ID}</code>
-                  </span>
-                  <span>
-                    Tab Name: <code className="text-emerald-400 font-mono font-bold">{SHEET_TAB}</code>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+                    <span className="font-semibold text-neutral-200">
+                      Cloud Firestore Real-Time Database Active
+                    </span>
+                  </div>
+                  <span className="text-[11px] font-mono text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded border border-emerald-800/40">
+                    {authorizedTeachers.length} Authorized Accounts
                   </span>
                 </div>
-                {sheetLastSynced && (
-                  <p className="text-[11px] text-neutral-500">
-                    Last synchronized: {new Date(sheetLastSynced).toLocaleTimeString()}
-                  </p>
-                )}
-                {sheetSyncError && (
-                  <p className="text-[11px] text-amber-400 bg-amber-950/40 p-2 rounded border border-amber-800/40">
-                    Notice: {sheetSyncError}. Teacher roster is synced via cloud database.
-                  </p>
-                )}
+                <p className="text-[11px] text-neutral-400 leading-relaxed">
+                  All additions, edits, and removals sync in real-time across Cloud Firestore. Any teacher added here (e.g. Corban) can immediately sign in with their Google account.
+                </p>
               </div>
 
-              {/* Current Teacher List */}
-              <div className="space-y-2">
+              {/* Current Teacher List with Edit and Delete Actions */}
+              <div className="space-y-2.5">
                 <div className="flex items-center justify-between mb-2">
                   <span className="text-xs font-bold uppercase tracking-wider text-neutral-400 block">
-                    Verified Teachers ({authorizedTeachers.length})
+                    Staff Accounts ({authorizedTeachers.length})
                   </span>
-                  <span className="text-[11px] text-neutral-400">
-                    Column C Google Account Access
+                  <span className="text-[11px] text-neutral-500">
+                    Modify or remove permissions below
                   </span>
                 </div>
 
                 {authorizedTeachers.map((t) => (
                   <div
                     key={t.email}
-                    className="p-3.5 rounded-xl bg-neutral-950 border border-neutral-800 flex items-center justify-between gap-4"
+                    className="p-3.5 rounded-xl bg-neutral-950 border border-neutral-800 hover:border-neutral-750 transition-colors flex items-center justify-between gap-4 group"
                   >
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-red-900/60 text-red-300 border border-red-700/50 flex items-center justify-center font-bold text-xs">
+                    <div className="flex items-center gap-3 min-w-0">
+                      <div className="w-9 h-9 rounded-full bg-red-900/60 text-red-200 border border-red-700/50 flex items-center justify-center font-bold text-xs shrink-0">
                         {t.name.charAt(0)}
                       </div>
-                      <div>
-                        <div className="text-xs font-bold text-white flex items-center gap-2">
-                          <span>{t.name}</span>
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-white flex items-center gap-2 truncate">
+                          <span className="truncate">{t.name}</span>
                           {t.isSuperAdmin && (
-                            <span className="px-1.5 py-0.2 rounded text-[10px] bg-red-950 text-red-300 border border-red-800">
+                            <span className="px-1.5 py-0.2 rounded text-[10px] bg-red-950 text-red-300 border border-red-800 shrink-0">
                               Admin
                             </span>
                           )}
                         </div>
-                        <div className="text-[11px] text-neutral-400 font-mono">{t.email}</div>
+                        <div className="text-[11px] text-neutral-400 font-mono truncate">{t.email}</div>
+                        <div className="text-[10.5px] text-neutral-500 truncate mt-0.5 sm:hidden">{t.role}</div>
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <span className="text-[11px] text-neutral-400 hidden sm:inline">{t.role}</span>
-                      <span className="text-[10px] font-bold px-2 py-0.5 rounded bg-emerald-950 text-emerald-400 border border-emerald-800/60">
-                        Authorized
-                      </span>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <span className="text-[11px] text-neutral-400 hidden sm:inline mr-1">{t.role}</span>
+                      
+                      {/* Modify / Edit Button */}
+                      <button
+                        onClick={() => {
+                          setEditingTeacher(t);
+                          setEditName(t.name);
+                          setEditRole(t.role);
+                        }}
+                        className="p-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-300 hover:text-white transition-colors cursor-pointer"
+                        title={`Modify details for ${t.name}`}
+                        aria-label="Edit Teacher"
+                      >
+                        <Pencil className="w-3.5 h-3.5 text-blue-400" />
+                      </button>
+
+                      {/* Remove / Delete Button */}
+                      {t.email.toLowerCase() === 'hermanf@gisboyshigh.net' ? (
+                        <span
+                          className="p-2 rounded-lg text-neutral-600 cursor-not-allowed"
+                          title="SuperAdmin account cannot be removed"
+                        >
+                          <ShieldCheck className="w-3.5 h-3.5 text-neutral-600" />
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => setTeacherToDelete(t)}
+                          className="p-2 rounded-lg bg-neutral-900 hover:bg-red-950/60 border border-neutral-800 hover:border-red-900/60 text-neutral-400 hover:text-red-300 transition-colors cursor-pointer"
+                          title={`Remove ${t.name}`}
+                          aria-label="Remove Teacher"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </div>
                   </div>
                 ))}
               </div>
             </div>
 
-            {/* Modal for Managing Teachers */}
+            {/* Modal for Adding Teachers */}
             {showAddTeacherModal && (
               <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
                 <div className="bg-neutral-900 border border-neutral-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
                   <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
                     <h3 className="font-bold text-base text-white">
-                      Manage Authorized Staff (Column C)
+                      Add Staff to Cloud Database
                     </h3>
                     <button
                       onClick={() => setShowAddTeacherModal(false)}
                       className="text-neutral-400 hover:text-white text-xs px-2 py-1 rounded bg-neutral-800 cursor-pointer"
                     >
-                      Close
+                      <X className="w-4 h-4" />
                     </button>
                   </div>
 
@@ -945,7 +983,7 @@ export const TeacherPortalDashboard: React.FC = () => {
                           : 'text-neutral-400 hover:text-neutral-200'
                       }`}
                     >
-                      Paste Column C Rows
+                      Bulk Paste List
                     </button>
                   </div>
 
@@ -963,50 +1001,51 @@ export const TeacherPortalDashboard: React.FC = () => {
                           role: newTeacherRole.trim() || 'GBHS Staff',
                           isSuperAdmin: newTeacherEmail.trim().toLowerCase() === 'hermanf@gisboyshigh.net',
                         });
-                        setRosterNotice(`Added ${newTeacherEmail.trim()} to authorized teachers roster.`);
+                        setRosterNotice(`Added ${newTeacherName.trim() || newTeacherEmail.trim()} to the Cloud Firestore database.`);
                         setNewTeacherName('');
                         setNewTeacherEmail('');
                         setShowAddTeacherModal(false);
                       }}
-                      className="space-y-3 text-xs"
+                      className="space-y-3.5 text-xs"
                     >
                       <div>
-                        <label className="block text-neutral-400 font-semibold mb-1">
-                          Teacher Name
+                        <label className="block text-neutral-300 font-semibold mb-1">
+                          Teacher Name *
                         </label>
                         <input
                           type="text"
-                          placeholder="e.g. Herman F."
+                          required
+                          placeholder="e.g. Corban"
                           value={newTeacherName}
                           onChange={(e) => setNewTeacherName(e.target.value)}
-                          className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white"
+                          className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 focus:border-red-500 focus:outline-none rounded-lg text-white"
                         />
                       </div>
 
                       <div>
-                        <label className="block text-neutral-400 font-semibold mb-1">
-                          Google Account Email (From Column C) *
+                        <label className="block text-neutral-300 font-semibold mb-1">
+                          School Google Email (@gisboyshigh.net) *
                         </label>
                         <input
                           type="email"
                           required
-                          placeholder="teacher@gisboyshigh.net"
+                          placeholder="e.g. corban@gisboyshigh.net"
                           value={newTeacherEmail}
                           onChange={(e) => setNewTeacherEmail(e.target.value)}
-                          className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white"
+                          className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 focus:border-red-500 focus:outline-none rounded-lg text-white font-mono"
                         />
                       </div>
 
                       <div>
-                        <label className="block text-neutral-400 font-semibold mb-1">
-                          Role / House
+                        <label className="block text-neutral-300 font-semibold mb-1">
+                          Role / House Assignment
                         </label>
                         <input
                           type="text"
                           placeholder="e.g. Tangaroa House Dean"
                           value={newTeacherRole}
                           onChange={(e) => setNewTeacherRole(e.target.value)}
-                          className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 rounded-lg text-white"
+                          className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 focus:border-red-500 focus:outline-none rounded-lg text-white"
                         />
                       </div>
 
@@ -1014,35 +1053,35 @@ export const TeacherPortalDashboard: React.FC = () => {
                         <button
                           type="button"
                           onClick={() => setShowAddTeacherModal(false)}
-                          className="px-3 py-2 rounded-lg bg-neutral-800 text-neutral-300 hover:text-white"
+                          className="px-3.5 py-2 rounded-lg bg-neutral-800 text-neutral-300 hover:text-white cursor-pointer"
                         >
                           Cancel
                         </button>
                         <button
                           type="submit"
-                          className="px-4 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-white font-bold"
+                          className="px-4 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-white font-bold cursor-pointer transition-colors"
                         >
-                          Save Teacher
+                          Save to Database
                         </button>
                       </div>
                     </form>
                   ) : (
-                    <div className="space-y-3 text-xs">
+                    <div className="space-y-3.5 text-xs">
                       <p className="text-neutral-400 leading-relaxed">
-                        Copy rows or emails straight from Google Sheet <code className="text-neutral-200">TEACHERS_26</code> and paste here. Column C emails will be automatically extracted.
+                        Paste rows or email addresses. Tab, comma, or newline-separated values will be automatically parsed and committed to Cloud Firestore.
                       </p>
                       <textarea
                         rows={6}
                         value={pasteText}
                         onChange={(e) => setPasteText(e.target.value)}
-                        placeholder={`Herman F.\tDean of Houses\thermanf@gisboyshigh.net\nMs. K. Walker\tAquatics Dean\tk.walker@gisboyshigh.net`}
-                        className="w-full p-3 bg-neutral-950 border border-neutral-800 rounded-lg text-white font-mono text-xs"
+                        placeholder={`Corban\tSports Lead\tcorban@gisboyshigh.net\nMs. K. Walker\tAquatics Dean\tk.walker@gisboyshigh.net`}
+                        className="w-full p-3 bg-neutral-950 border border-neutral-800 focus:border-red-500 focus:outline-none rounded-lg text-white font-mono text-xs"
                       />
                       <div className="flex justify-end gap-2">
                         <button
                           type="button"
                           onClick={() => setShowAddTeacherModal(false)}
-                          className="px-3 py-2 rounded-lg bg-neutral-800 text-neutral-300 hover:text-white"
+                          className="px-3.5 py-2 rounded-lg bg-neutral-800 text-neutral-300 hover:text-white cursor-pointer"
                         >
                           Cancel
                         </button>
@@ -1051,10 +1090,9 @@ export const TeacherPortalDashboard: React.FC = () => {
                           onClick={() => {
                             const parsed = parseTeacherCsv(pasteText);
                             if (parsed.length === 0) {
-                              alert('No valid email addresses found in pasted text. Please make sure rows contain emails.');
+                              alert('No valid email addresses found in pasted text.');
                               return;
                             }
-                            // Merge with existing
                             const merged = [...authorizedTeachers];
                             parsed.forEach((p) => {
                               const idx = merged.findIndex((m) => m.email.toLowerCase() === p.email.toLowerCase());
@@ -1065,17 +1103,193 @@ export const TeacherPortalDashboard: React.FC = () => {
                               }
                             });
                             updateAuthorizedTeachers(merged);
-                            setRosterNotice(`Successfully imported ${parsed.length} teachers from pasted data.`);
+                            setRosterNotice(`Successfully synced ${parsed.length} staff to Cloud Firestore.`);
                             setPasteText('');
                             setShowAddTeacherModal(false);
                           }}
-                          className="px-4 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-white font-bold"
+                          className="px-4 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-white font-bold cursor-pointer transition-colors"
                         >
                           Import & Sync to Cloud
                         </button>
                       </div>
                     </div>
                   )}
+                </div>
+              </div>
+            )}
+
+            {/* Modal for Modifying / Editing Existing Teacher */}
+            {editingTeacher && (
+              <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className="bg-neutral-900 border border-neutral-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+                  <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
+                    <div className="flex items-center gap-2">
+                      <Pencil className="w-4 h-4 text-blue-400" />
+                      <h3 className="font-bold text-base text-white">
+                        Modify Teacher Details
+                      </h3>
+                    </div>
+                    <button
+                      onClick={() => setEditingTeacher(null)}
+                      className="text-neutral-400 hover:text-white text-xs p-1 rounded-lg bg-neutral-800 cursor-pointer"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <form
+                    onSubmit={async (e) => {
+                      e.preventDefault();
+                      if (!editName.trim()) {
+                        setRosterNotice('Teacher name cannot be empty.');
+                        return;
+                      }
+                      try {
+                        await editAuthorizedTeacher(editingTeacher.email, {
+                          name: editName.trim(),
+                          role: editRole.trim() || 'GBHS Staff',
+                        });
+                        setRosterNotice(`Updated details for ${editName.trim()} in Cloud Firestore.`);
+                        setEditingTeacher(null);
+                      } catch (err: any) {
+                        setRosterNotice(`Failed to update teacher: ${err?.message || 'Error'}`);
+                      }
+                    }}
+                    className="space-y-3.5 text-xs"
+                  >
+                    <div>
+                      <label className="block text-neutral-400 font-semibold mb-1">
+                        Google Account Email (Identifier)
+                      </label>
+                      <input
+                        type="email"
+                        disabled
+                        value={editingTeacher.email}
+                        className="w-full px-3 py-2 bg-neutral-950/60 border border-neutral-800/80 rounded-lg text-neutral-400 font-mono cursor-not-allowed"
+                      />
+                      <p className="text-[10px] text-neutral-500 mt-1">
+                        Email addresses serve as Google OAuth IDs. To change an email, remove this teacher and add a new entry.
+                      </p>
+                    </div>
+
+                    <div>
+                      <label className="block text-neutral-300 font-semibold mb-1">
+                        Display Name *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={editName}
+                        onChange={(e) => setEditName(e.target.value)}
+                        placeholder="e.g. Corban"
+                        className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 focus:border-red-500 focus:outline-none rounded-lg text-white"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-neutral-300 font-semibold mb-1">
+                        Role / House Assignment
+                      </label>
+                      <input
+                        type="text"
+                        value={editRole}
+                        onChange={(e) => setEditRole(e.target.value)}
+                        placeholder="e.g. Tangaroa House Dean"
+                        className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 focus:border-red-500 focus:outline-none rounded-lg text-white"
+                      />
+                    </div>
+
+                    <div className="pt-2 flex justify-end gap-2">
+                      <button
+                        type="button"
+                        onClick={() => setEditingTeacher(null)}
+                        className="px-3.5 py-2 rounded-lg bg-neutral-800 text-neutral-300 hover:text-white cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="submit"
+                        className="px-4 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-white font-bold cursor-pointer transition-colors shadow-sm"
+                      >
+                        Save Changes
+                      </button>
+                    </div>
+                  </form>
+                </div>
+              </div>
+            )}
+            {/* Modal for Deleting Teacher Confirmation */}
+            {teacherToDelete && (
+              <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className="bg-neutral-900 border border-neutral-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+                  <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
+                    <div className="flex items-center gap-2 text-red-400">
+                      <Trash2 className="w-4 h-4" />
+                      <h3 className="font-bold text-base text-white">
+                        Remove Staff Member
+                      </h3>
+                    </div>
+                    <button
+                      onClick={() => !isDeletingTeacher && setTeacherToDelete(null)}
+                      disabled={isDeletingTeacher}
+                      className="text-neutral-400 hover:text-white text-xs p-1 rounded-lg bg-neutral-800 cursor-pointer disabled:opacity-50"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-3 text-xs">
+                    <p className="text-neutral-300 leading-relaxed">
+                      Are you sure you want to remove <strong className="text-white">{teacherToDelete.name}</strong> from the Cloud Firestore database?
+                    </p>
+                    <div className="p-3 bg-neutral-950 rounded-xl border border-neutral-800 space-y-1 font-mono text-[11px]">
+                      <div className="text-neutral-400">Email: <span className="text-neutral-200">{teacherToDelete.email}</span></div>
+                      <div className="text-neutral-400">Role: <span className="text-neutral-200">{teacherToDelete.role}</span></div>
+                    </div>
+                    <p className="text-red-400/90 text-[11px] leading-relaxed">
+                      They will immediately lose scoring access in the Teacher Portal and won't be able to log in with their Google account.
+                    </p>
+                  </div>
+
+                  <div className="pt-2 flex justify-end gap-2 text-xs">
+                    <button
+                      type="button"
+                      disabled={isDeletingTeacher}
+                      onClick={() => setTeacherToDelete(null)}
+                      className="px-3.5 py-2 rounded-lg bg-neutral-800 text-neutral-300 hover:text-white cursor-pointer transition-colors disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isDeletingTeacher}
+                      onClick={async () => {
+                        setIsDeletingTeacher(true);
+                        try {
+                          await removeAuthorizedTeacher(teacherToDelete.email);
+                          setRosterNotice(`Successfully removed ${teacherToDelete.name} (${teacherToDelete.email}) from authorized staff.`);
+                          setTeacherToDelete(null);
+                        } catch (err: any) {
+                          setRosterNotice(`Error removing teacher: ${err?.message || 'Failed'}`);
+                        } finally {
+                          setIsDeletingTeacher(false);
+                        }
+                      }}
+                      className="px-4 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-white font-bold cursor-pointer transition-colors shadow-sm flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      {isDeletingTeacher ? (
+                        <>
+                          <RotateCcw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Removing...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>Confirm Remove</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -1095,6 +1309,18 @@ export const TeacherPortalDashboard: React.FC = () => {
                 </p>
               </div>
 
+              {settingsNotice && (
+                <div className="mb-5 p-3 rounded-xl bg-emerald-950/80 border border-emerald-800 text-emerald-200 text-xs flex items-center justify-between">
+                  <span>{settingsNotice}</span>
+                  <button
+                    onClick={() => setSettingsNotice(null)}
+                    className="text-emerald-400 hover:text-white text-xs ml-2 cursor-pointer"
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              )}
+
               <div className="space-y-4">
                 <div className="p-4 rounded-xl bg-neutral-950 border border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
@@ -1104,12 +1330,8 @@ export const TeacherPortalDashboard: React.FC = () => {
                     </p>
                   </div>
                   <button
-                    onClick={() => {
-                      if (window.confirm('Reset to default competition sample records?')) {
-                        resetToDefaultData();
-                      }
-                    }}
-                    className="px-3.5 py-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-xs font-semibold text-neutral-200 transition-colors flex items-center justify-center gap-1.5 shrink-0"
+                    onClick={() => setShowResetConfirm(true)}
+                    className="px-3.5 py-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-xs font-semibold text-neutral-200 transition-colors flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
                   >
                     <RotateCcw className="w-3.5 h-3.5 text-neutral-400" />
                     <span>Reset Data</span>
@@ -1125,7 +1347,7 @@ export const TeacherPortalDashboard: React.FC = () => {
                   </div>
                   <button
                     onClick={exportLedgerCSV}
-                    className="px-3.5 py-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-xs font-semibold text-neutral-200 transition-colors flex items-center justify-center gap-1.5 shrink-0"
+                    className="px-3.5 py-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-xs font-semibold text-neutral-200 transition-colors flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
                   >
                     <Download className="w-3.5 h-3.5 text-neutral-400" />
                     <span>Export CSV</span>
@@ -1140,16 +1362,8 @@ export const TeacherPortalDashboard: React.FC = () => {
                     </p>
                   </div>
                   <button
-                    onClick={() => {
-                      if (
-                        window.confirm(
-                          'Are you sure you want to clear all points? All 4 houses will be set to 0. (You can download a CSV backup first)'
-                        )
-                      ) {
-                        clearAllPoints();
-                      }
-                    }}
-                    className="px-3.5 py-2 rounded-lg bg-red-950 hover:bg-red-900 border border-red-800 text-xs font-bold text-red-200 transition-colors flex items-center justify-center gap-1.5 shrink-0"
+                    onClick={() => setShowClearConfirm(true)}
+                    className="px-3.5 py-2 rounded-lg bg-red-950 hover:bg-red-900 border border-red-800 text-xs font-bold text-red-200 transition-colors flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
                   >
                     <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
                     <span>Clear All Points</span>
@@ -1160,6 +1374,160 @@ export const TeacherPortalDashboard: React.FC = () => {
           </div>
         )}
       </main>
+
+      {/* Modal for Deleting Ledger Event Confirmation */}
+      {eventToDelete && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
+              <div className="flex items-center gap-2 text-red-400">
+                <Trash2 className="w-4 h-4" />
+                <h3 className="font-bold text-base text-white">Delete Scoring Entry</h3>
+              </div>
+              <button
+                onClick={() => !isDeletingEvent && setEventToDelete(null)}
+                disabled={isDeletingEvent}
+                className="text-neutral-400 hover:text-white text-xs p-1 rounded-lg bg-neutral-800 cursor-pointer disabled:opacity-50"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <p className="text-neutral-300 leading-relaxed">
+                Delete this scoring entry from the ledger? The <strong className="text-white">{eventToDelete.points} points</strong> awarded to <strong className="text-white">{rawHouses[eventToDelete.houseId as HouseId]?.name || eventToDelete.houseId}</strong> will be permanently removed.
+              </p>
+              <div className="p-3 bg-neutral-950 rounded-xl border border-neutral-800 space-y-1">
+                <div className="font-semibold text-white">{eventToDelete.title}</div>
+                <div className="text-neutral-400 text-[11px]">Logged by {eventToDelete.awardedBy} · {eventToDelete.term} · +{eventToDelete.points} pts</div>
+              </div>
+            </div>
+
+            <div className="pt-2 flex justify-end gap-2 text-xs">
+              <button
+                type="button"
+                disabled={isDeletingEvent}
+                onClick={() => setEventToDelete(null)}
+                className="px-3.5 py-2 rounded-lg bg-neutral-800 text-neutral-300 hover:text-white cursor-pointer transition-colors disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingEvent}
+                onClick={async () => {
+                  setIsDeletingEvent(true);
+                  try {
+                    await deletePointEvent(eventToDelete.id);
+                    setEventToDelete(null);
+                  } finally {
+                    setIsDeletingEvent(false);
+                  }
+                }}
+                className="px-4 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-white font-bold cursor-pointer transition-colors shadow-sm flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {isDeletingEvent ? 'Deleting...' : 'Confirm Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal for Resetting to Default Sample Records */}
+      {showResetConfirm && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
+              <div className="flex items-center gap-2 text-neutral-200">
+                <RotateCcw className="w-4 h-4 text-blue-400" />
+                <h3 className="font-bold text-base text-white">Reset to Sample Data</h3>
+              </div>
+              <button
+                onClick={() => setShowResetConfirm(false)}
+                className="text-neutral-400 hover:text-white text-xs p-1 rounded-lg bg-neutral-800 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <p className="text-xs text-neutral-300 leading-relaxed">
+              This will restore the standard GBHS sample points ledger for Athletics Day, Swimming Sports, and Haka. Any custom events will be replaced.
+            </p>
+
+            <div className="pt-2 flex justify-end gap-2 text-xs">
+              <button
+                type="button"
+                onClick={() => setShowResetConfirm(false)}
+                className="px-3.5 py-2 rounded-lg bg-neutral-800 text-neutral-300 hover:text-white cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  await resetToDefaultData();
+                  setShowResetConfirm(false);
+                  setSettingsNotice('Competition dataset successfully reset to initial sample records.');
+                }}
+                className="px-4 py-2 rounded-lg bg-blue-700 hover:bg-blue-600 text-white font-bold cursor-pointer transition-colors shadow-sm"
+              >
+                Confirm Reset
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal for Clearing All Points */}
+      {showClearConfirm && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
+              <div className="flex items-center gap-2 text-red-400">
+                <AlertTriangle className="w-4 h-4 text-red-400" />
+                <h3 className="font-bold text-base text-white">Clear All Points</h3>
+              </div>
+              <button
+                onClick={() => setShowClearConfirm(false)}
+                className="text-neutral-400 hover:text-white text-xs p-1 rounded-lg bg-neutral-800 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <p className="text-neutral-300 leading-relaxed">
+                Are you sure you want to clear all points? All 4 houses will be reset to <strong className="text-white">0 points</strong> to begin a brand new term or school year.
+              </p>
+              <p className="text-neutral-400 text-[11px]">
+                Tip: You can download an official CSV backup of the current ledger from this tab before proceeding.
+              </p>
+            </div>
+
+            <div className="pt-2 flex justify-end gap-2 text-xs">
+              <button
+                type="button"
+                onClick={() => setShowClearConfirm(false)}
+                className="px-3.5 py-2 rounded-lg bg-neutral-800 text-neutral-300 hover:text-white cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={async () => {
+                  await clearAllPoints();
+                  setShowClearConfirm(false);
+                  setSettingsNotice('All points have been cleared. All houses are now at 0 points.');
+                }}
+                className="px-4 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-white font-bold cursor-pointer transition-colors shadow-sm flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>Confirm Clear All</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

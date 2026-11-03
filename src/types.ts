@@ -41,6 +41,7 @@ export interface PointEvent {
 }
 
 export interface TeacherAccount {
+  id?: string;
   email: string;
   name: string;
   role: string;

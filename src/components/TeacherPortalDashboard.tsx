@@ -300,12 +300,7 @@ export const TeacherPortalDashboard: React.FC = () => {
                               src={house.crest}
                               alt={house.name}
                               className="w-full h-full object-contain"
-                              onError={(e) => {
-                                const target = e.currentTarget;
-                                if (!target.src.includes('/public/')) {
-                                  target.src = '/public' + house.crest;
-                                }
-                              }}
+                              loading="eager"
                             />
                           </div>
                           <span className="font-bold text-xs text-white font-display truncate w-full">
@@ -533,12 +528,7 @@ export const TeacherPortalDashboard: React.FC = () => {
                             src={house?.crest}
                             alt={house?.name}
                             className="w-full h-full object-contain"
-                            onError={(e) => {
-                              const target = e.currentTarget;
-                              if (!target.src.includes('/public/')) {
-                                target.src = '/public' + house?.crest;
-                              }
-                            }}
+                            loading="eager"
                           />
                         </div>
 

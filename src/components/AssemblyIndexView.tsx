@@ -179,13 +179,9 @@ export const AssemblyIndexView: React.FC = () => {
                       <img
                         src={house.crest}
                         alt={house.name}
-                        className="w-full h-full object-contain filter drop-shadow-[0_4px_14px_rgba(0,0,0,0.65)]"
-                        onError={(e) => {
-                          const target = e.currentTarget;
-                          if (!target.src.includes('/public/')) {
-                            target.src = '/public' + house.crest;
-                          }
-                        }}
+                        className="w-full h-full object-contain filter drop-shadow-[0_4px_14px_rgba(0,0,0,0.65)] select-none pointer-events-none"
+                        loading="eager"
+                        decoding="async"
                       />
                     </div>
                   </div>

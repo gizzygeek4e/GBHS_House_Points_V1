@@ -35,6 +35,7 @@ export interface PointEvent {
   category: PointCategory;
   term: 'Term 1' | 'Term 2' | 'Term 3' | 'Term 4';
   awardedBy: string;
+  teacherEmail?: string;
   timestamp: number;
   notes?: string;
 }

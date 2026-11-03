@@ -1,10 +1,14 @@
 import { House, PointEvent, TeacherAccount } from '../types';
+import tawhirimateaCrest from '../assets/houses/TAWHIRIMATEA_transparent.png';
+import tumatauengaCrest from '../assets/houses/TUMATAUENGA_transparent.png';
+import tangaroaCrest from '../assets/houses/TANGAROA_transparent.png';
+import tanemahutaCrest from '../assets/houses/TANE_MAHUTA_transparent.png';
 
 export const INITIAL_HOUSES: Record<string, Omit<House, 'currentTotal' | 'rank'>> = {
   tawhirimatea: {
     id: 'tawhirimatea',
     name: 'Tāwhirimātea',
-    crest: '/assets/aistudio/TAWHIRIMATEA_transparent.png',
+    crest: tawhirimateaCrest,
     primaryColor: '#a2207e',
     secondaryColor: '#f472b6',
     accentBadgeColor: 'bg-fuchsia-950/80 text-fuchsia-300 border-fuchsia-700/50',
@@ -19,7 +23,7 @@ export const INITIAL_HOUSES: Record<string, Omit<House, 'currentTotal' | 'rank'>
   tumatauenga: {
     id: 'tumatauenga',
     name: 'Tūmatauenga',
-    crest: '/assets/aistudio/TUMATAUENGA_transparent.png',
+    crest: tumatauengaCrest,
     primaryColor: '#dc2626',
     secondaryColor: '#f97316',
     accentBadgeColor: 'bg-red-950/80 text-red-300 border-red-700/50',
@@ -34,7 +38,7 @@ export const INITIAL_HOUSES: Record<string, Omit<House, 'currentTotal' | 'rank'>
   tangaroa: {
     id: 'tangaroa',
     name: 'Tangaroa',
-    crest: '/assets/aistudio/TANGAROA_transparent.png',
+    crest: tangaroaCrest,
     primaryColor: '#eab308',
     secondaryColor: '#0284c7',
     accentBadgeColor: 'bg-amber-950/80 text-amber-300 border-amber-700/50',
@@ -49,7 +53,7 @@ export const INITIAL_HOUSES: Record<string, Omit<House, 'currentTotal' | 'rank'>
   tanemahuta: {
     id: 'tanemahuta',
     name: 'Tāne Mahuta',
-    crest: '/assets/aistudio/TANE_MAHUTA_transparent.png',
+    crest: tanemahutaCrest,
     primaryColor: '#84cc16',
     secondaryColor: '#16a34a',
     accentBadgeColor: 'bg-emerald-950/80 text-lime-300 border-lime-700/50',

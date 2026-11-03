@@ -1,0 +1,108 @@
+{
+  "entities": {
+    "pointEvent": {
+      "title": "Point Event",
+      "description": "Represents an individual score allocation to a house by an authorized teacher",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "houseId": {
+          "type": "string",
+          "enum": [
+            "tawhirimatea",
+            "tumatauenga",
+            "tangaroa",
+            "tanemahuta"
+          ]
+        },
+        "points": {
+          "type": "number"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 300
+        },
+        "category": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "term": {
+          "type": "string",
+          "enum": [
+            "Term 1",
+            "Term 2",
+            "Term 3",
+            "Term 4"
+          ]
+        },
+        "awardedBy": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "teacherEmail": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "timestamp": {
+          "type": "number"
+        },
+        "notes": {
+          "type": "string",
+          "maxLength": 1000
+        }
+      },
+      "required": [
+        "id",
+        "houseId",
+        "points",
+        "title",
+        "category",
+        "term",
+        "awardedBy",
+        "timestamp"
+      ]
+    },
+    "authorizedTeacher": {
+      "title": "Authorized Teacher",
+      "description": "Teacher account authorized to award house points",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "role": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "isSuperAdmin": {
+          "type": "boolean"
+        },
+        "updatedAt": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "email",
+        "name"
+      ]
+    }
+  },
+  "firestore": {
+    "/pointEvents/{eventId}": {
+      "schema": "pointEvent",
+      "description": "Live house point transactions visible to all students, staff, and assembly screens"
+    },
+    "/authorizedTeachers/{teacherId}": {
+      "schema": "authorizedTeacher",
+      "description": "Directory of teachers authorized to award house points, synced from TEACHERS_26"
+    }
+  }
+}

@@ -1,0 +1,71 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net - Default Deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isValidHouseId(houseId) {
+      return houseId in ['tawhirimatea', 'tumatauenga', 'tangaroa', 'tanemahuta'];
+    }
+
+    function isValidTerm(term) {
+      return term in ['Term 1', 'Term 2', 'Term 3', 'Term 4'];
+    }
+
+    function isValidPointEvent(data) {
+      return data.keys().hasAll(['id', 'houseId', 'points', 'title', 'category', 'term', 'awardedBy', 'timestamp'])
+        && data.keys().hasOnly(['id', 'houseId', 'points', 'title', 'category', 'term', 'awardedBy', 'timestamp', 'notes', 'teacherEmail'])
+        && data.id is string && data.id.size() > 0 && data.id.size() <= 128
+        && isValidHouseId(data.houseId)
+        && data.points is number && data.points >= -1000 && data.points <= 1000
+        && data.title is string && data.title.size() > 0 && data.title.size() <= 300
+        && data.category is string && data.category.size() > 0 && data.category.size() <= 100
+        && isValidTerm(data.term)
+        && data.awardedBy is string && data.awardedBy.size() > 0 && data.awardedBy.size() <= 150
+        && data.timestamp is number
+        && (!('teacherEmail' in data) || (data.teacherEmail is string && data.teacherEmail.size() <= 200))
+        && (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000));
+    }
+
+    function isValidAuthorizedTeacher(data) {
+      return data.keys().hasAll(['email', 'name'])
+        && data.keys().hasOnly(['email', 'name', 'role', 'isSuperAdmin', 'updatedAt'])
+        && data.email is string && data.email.size() > 0 && data.email.size() <= 200
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 150
+        && (!('role' in data) || (data.role is string && data.role.size() <= 150))
+        && (!('isSuperAdmin' in data) || (data.isSuperAdmin is bool))
+        && (!('updatedAt' in data) || (data.updatedAt is number));
+    }
+
+    // Point Events Collection:
+    // Public read for assembly hall screens, mobile phones, and community leaderboard.
+    // Writes are validated strictly by schema and payload boundaries.
+    match /pointEvents/{eventId} {
+      allow read: if true;
+      allow create: if isValidId(eventId) && isValidPointEvent(request.resource.data);
+      allow update: if isValidId(eventId)
+        && isValidPointEvent(request.resource.data)
+        && request.resource.data.id == resource.data.id;
+      allow delete: if isValidId(eventId);
+    }
+
+    // Authorized Teachers Collection:
+    // Holds the directory of school teachers verified against the TEACHERS_26 roster.
+    match /authorizedTeachers/{teacherId} {
+      allow read: if true;
+      allow write: if isValidId(teacherId) && isValidAuthorizedTeacher(request.resource.data);
+    }
+  }
+}

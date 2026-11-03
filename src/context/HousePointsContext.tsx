@@ -1,5 +1,17 @@
 import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import confetti from 'canvas-confetti';
+import {
+  collection,
+  doc,
+  setDoc,
+  deleteDoc,
+  updateDoc,
+  onSnapshot,
+  writeBatch,
+  query,
+  orderBy,
+} from 'firebase/firestore';
+import { db, handleFirestoreError, OperationType, testFirestoreConnection } from '../services/firebase';
 import { House, HouseId, PointEvent, TeacherUser, TeacherAccount, SchoolTerm, PointCategory } from '../types';
 import { INITIAL_HOUSES, INITIAL_POINT_EVENTS, INITIAL_AUTHORIZED_TEACHERS } from '../data/initialData';
 import { soundManager } from '../utils/audio';
@@ -9,9 +21,6 @@ import {
   logoutGoogle,
   getCachedAccessToken,
   setCachedAccessToken,
-  SPREADSHEET_ID,
-  SHEET_TAB,
-  SHEET_URL,
 } from '../services/sheetsAuth';
 
 const STORAGE_EVENTS_KEY = 'gbhs_house_points_events_v3';
@@ -40,11 +49,11 @@ interface HousePointsContextType {
   isSyncingSheet: boolean;
   sheetSyncError: string | null;
   sheetLastSynced: number | null;
-  addPoints: (data: Omit<PointEvent, 'id' | 'timestamp'>) => void;
-  deletePointEvent: (id: string) => void;
-  editPointEvent: (id: string, updated: Partial<PointEvent>) => void;
-  resetToDefaultData: () => void;
-  clearAllPoints: () => void;
+  addPoints: (data: Omit<PointEvent, 'id' | 'timestamp'>) => Promise<void>;
+  deletePointEvent: (id: string) => Promise<void>;
+  editPointEvent: (id: string, updated: Partial<PointEvent>) => Promise<void>;
+  resetToDefaultData: () => Promise<void>;
+  clearAllPoints: () => Promise<void>;
   exportLedgerCSV: () => void;
   audioEnabled: boolean;
   toggleAudio: () => void;
@@ -58,7 +67,7 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   // Navigation View State
   const [currentView, setCurrentView] = useState<AppView>('assembly');
 
-  // Load events
+  // Load events (initial local cache or fallback to initial)
   const [events, setEvents] = useState<PointEvent[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_EVENTS_KEY);
@@ -96,7 +105,7 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [audioEnabled, setAudioEnabled] = useState<boolean>(soundManager.getEnabled());
   const [prevLeaderId, setPrevLeaderId] = useState<HouseId | null>(null);
 
-  // Persist state
+  // Persist state to local cache for offline instant startup
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_EVENTS_KEY, JSON.stringify(events));
@@ -119,44 +128,68 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     } catch {}
   }, [teacherUser]);
 
-  // Real-time broadcast sync across tabs
+  // LIVE FIRESTORE REAL-TIME SYNC
+  // Connects all community screens, assembly projectors, student phones, and staff laptops
   useEffect(() => {
-    let channel: BroadcastChannel | null = null;
-    try {
-      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-        channel = new BroadcastChannel('gbhs_house_sync');
-        channel.onmessage = (msg) => {
-          if (msg.data?.type === 'UPDATE_EVENTS' && Array.isArray(msg.data.events)) {
-            setEvents(msg.data.events);
-          }
-        };
-      }
-    } catch {}
+    testFirestoreConnection();
 
-    const handleStorageChange = (e: StorageEvent) => {
-      if (e.key === STORAGE_EVENTS_KEY && e.newValue) {
-        try {
-          setEvents(JSON.parse(e.newValue));
-        } catch {}
+    const eventsRef = collection(db, 'pointEvents');
+    const eventsQuery = query(eventsRef, orderBy('timestamp', 'desc'));
+
+    const unsubscribeEvents = onSnapshot(
+      eventsQuery,
+      async (snapshot) => {
+        if (snapshot.empty) {
+          // If the Firestore collection is fresh and empty, automatically seed initial house events
+          try {
+            const batch = writeBatch(db);
+            INITIAL_POINT_EVENTS.forEach((ev) => {
+              const docRef = doc(db, 'pointEvents', ev.id);
+              batch.set(docRef, ev);
+            });
+            await batch.commit();
+          } catch (seedErr) {
+            console.warn('Initial Firestore seed note:', seedErr);
+          }
+          return;
+        }
+
+        const liveEvents: PointEvent[] = [];
+        snapshot.forEach((d) => {
+          liveEvents.push(d.data() as PointEvent);
+        });
+
+        setEvents(liveEvents);
+      },
+      (error) => {
+        console.error('Real-time points sync error:', error);
+        handleFirestoreError(error, OperationType.GET, 'pointEvents');
       }
-    };
-    window.addEventListener('storage', handleStorageChange);
+    );
+
+    // Sync authorized teacher roster across devices
+    const teachersRef = collection(db, 'authorizedTeachers');
+    const unsubscribeTeachers = onSnapshot(
+      teachersRef,
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const liveTeachers: TeacherAccount[] = [];
+          snapshot.forEach((d) => {
+            liveTeachers.push(d.data() as TeacherAccount);
+          });
+          setAuthorizedTeachers(liveTeachers);
+        }
+      },
+      (error) => {
+        console.warn('Real-time teachers sync warning:', error);
+      }
+    );
 
     return () => {
-      window.removeEventListener('storage', handleStorageChange);
-      if (channel) channel.close();
+      unsubscribeEvents();
+      unsubscribeTeachers();
     };
   }, []);
-
-  const broadcastEvents = (newEvents: PointEvent[]) => {
-    try {
-      if (typeof window !== 'undefined' && 'BroadcastChannel' in window) {
-        const channel = new BroadcastChannel('gbhs_house_sync');
-        channel.postMessage({ type: 'UPDATE_EVENTS', events: newEvents });
-        channel.close();
-      }
-    } catch {}
-  };
 
   // Filtered events
   const filteredEvents = useMemo(() => {
@@ -253,6 +286,28 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
       if (sheetTeachers && sheetTeachers.length > 0) {
         setAuthorizedTeachers(sheetTeachers);
         setSheetLastSynced(Date.now());
+
+        // Sync to Firestore so all connected devices immediately have the verified roster
+        try {
+          const batch = writeBatch(db);
+          sheetTeachers.forEach((t) => {
+            const docId = t.email.toLowerCase().replace(/[^a-zA-Z0-9_-]/g, '_');
+            batch.set(
+              doc(db, 'authorizedTeachers', docId),
+              {
+                email: t.email,
+                name: t.name,
+                role: t.role,
+                isSuperAdmin: !!t.isSuperAdmin,
+                updatedAt: Date.now(),
+              },
+              { merge: true }
+            );
+          });
+          await batch.commit();
+        } catch (dbErr) {
+          console.warn('Could not mirror sheet teachers to Firestore:', dbErr);
+        }
       }
     } catch (err: any) {
       console.warn('Sheet sync warning:', err);
@@ -286,6 +341,28 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
           teachersList = fetched;
           setAuthorizedTeachers(fetched);
           setSheetLastSynced(Date.now());
+
+          // Persist to Firestore
+          try {
+            const batch = writeBatch(db);
+            fetched.forEach((t) => {
+              const docId = t.email.toLowerCase().replace(/[^a-zA-Z0-9_-]/g, '_');
+              batch.set(
+                doc(db, 'authorizedTeachers', docId),
+                {
+                  email: t.email,
+                  name: t.name,
+                  role: t.role,
+                  isSuperAdmin: !!t.isSuperAdmin,
+                  updatedAt: Date.now(),
+                },
+                { merge: true }
+              );
+            });
+            await batch.commit();
+          } catch (fErr) {
+            console.warn('Firestore teacher batch sync note:', fErr);
+          }
         }
       } catch (sheetErr: any) {
         console.warn('Could not read sheet directly, falling back to cached roster:', sheetErr);
@@ -382,47 +459,99 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     soundManager.playClick();
   };
 
-  const addPoints = (data: Omit<PointEvent, 'id' | 'timestamp'>) => {
+  /**
+   * ADD POINTS:
+   * Instantly creates a live PointEvent and writes to Cloud Firestore.
+   * All connected screens in assembly halls and on devices receive the live score update instantly.
+   */
+  const addPoints = async (data: Omit<PointEvent, 'id' | 'timestamp'>) => {
     const newEvent: PointEvent = {
       ...data,
       id: 'pe-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
       timestamp: Date.now(),
+      teacherEmail: teacherUser?.email || 'hermanf@gisboyshigh.net',
     };
 
-    const updated = [newEvent, ...events];
-    setEvents(updated);
-    broadcastEvents(updated);
+    // Optimistically update local view
+    setEvents((prev) => [newEvent, ...prev.filter((e) => e.id !== newEvent.id)]);
 
     soundManager.playPointAward(data.points);
     const house = INITIAL_HOUSES[data.houseId];
     if (house) {
       triggerConfetti([house.primaryColor, house.secondaryColor, '#ffffff']);
     }
+
+    try {
+      await setDoc(doc(db, 'pointEvents', newEvent.id), newEvent);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, `pointEvents/${newEvent.id}`);
+    }
   };
 
-  const deletePointEvent = (id: string) => {
-    const updated = events.filter((e) => e.id !== id);
-    setEvents(updated);
-    broadcastEvents(updated);
+  /**
+   * DELETE POINT EVENT:
+   * Deletes from Cloud Firestore and broadcasts deletion to all live displays.
+   */
+  const deletePointEvent = async (id: string) => {
+    setEvents((prev) => prev.filter((e) => e.id !== id));
     soundManager.playClick();
+
+    try {
+      await deleteDoc(doc(db, 'pointEvents', id));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `pointEvents/${id}`);
+    }
   };
 
-  const editPointEvent = (id: string, updatedFields: Partial<PointEvent>) => {
-    const updated = events.map((ev) => (ev.id === id ? { ...ev, ...updatedFields } : ev));
-    setEvents(updated);
-    broadcastEvents(updated);
+  /**
+   * EDIT POINT EVENT:
+   * Updates doc in Cloud Firestore and syncs across all devices.
+   */
+  const editPointEvent = async (id: string, updatedFields: Partial<PointEvent>) => {
+    setEvents((prev) => prev.map((ev) => (ev.id === id ? { ...ev, ...updatedFields } : ev)));
+
+    try {
+      await updateDoc(doc(db, 'pointEvents', id), updatedFields);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `pointEvents/${id}`);
+    }
   };
 
-  const resetToDefaultData = () => {
+  /**
+   * RESET TO DEFAULT:
+   * Replaces Firestore items with default baseline dataset.
+   */
+  const resetToDefaultData = async () => {
+    soundManager.playClick();
     setEvents(INITIAL_POINT_EVENTS);
-    broadcastEvents(INITIAL_POINT_EVENTS);
-    soundManager.playClick();
+
+    try {
+      const batch = writeBatch(db);
+      INITIAL_POINT_EVENTS.forEach((ev) => {
+        batch.set(doc(db, 'pointEvents', ev.id), ev);
+      });
+      await batch.commit();
+    } catch (err) {
+      console.warn('Reset sync warning:', err);
+    }
   };
 
-  const clearAllPoints = () => {
-    setEvents([]);
-    broadcastEvents([]);
+  /**
+   * CLEAR ALL POINTS:
+   */
+  const clearAllPoints = async () => {
     soundManager.playClick();
+    setEvents([]);
+
+    try {
+      const batch = writeBatch(db);
+      events.forEach((ev) => {
+        batch.delete(doc(db, 'pointEvents', ev.id));
+      });
+      await batch.commit();
+    } catch (err) {
+      console.warn('Clear all sync warning:', err);
+    }
   };
 
   const exportLedgerCSV = () => {
@@ -495,8 +624,10 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   );
 };
 
-export const useHousePoints = () => {
-  const ctx = useContext(HousePointsContext);
-  if (!ctx) throw new Error('useHousePoints must be used within HousePointsProvider');
-  return ctx;
+export const useHousePoints = (): HousePointsContextType => {
+  const context = useContext(HousePointsContext);
+  if (!context) {
+    throw new Error('useHousePoints must be used within a HousePointsProvider');
+  }
+  return context;
 };

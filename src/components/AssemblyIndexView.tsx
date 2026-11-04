@@ -117,13 +117,20 @@ export const AssemblyIndexView: React.FC = () => {
         {/* Lead Status Tag */}
         <div className="mb-6 text-center">
           <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-neutral-900/90 border border-neutral-800 text-xs font-semibold text-neutral-300 shadow-md">
-            <span className="w-2.5 h-2.5 rounded-full shadow-sm" style={{ backgroundColor: currentLeader?.primaryColor }} />
-            <span>
-              <strong className="text-white">{currentLeader?.name}</strong> leads the championship by{' '}
-              <span className="text-amber-400 font-mono font-bold">
-                +{houses[1] ? (currentLeader.currentTotal - houses[1].currentTotal).toLocaleString() : 0} pts
+            <span className="w-2.5 h-2.5 rounded-full shadow-sm" style={{ backgroundColor: currentLeader?.primaryColor || '#dc2626' }} />
+            {currentLeader && currentLeader.currentTotal > 0 ? (
+              <span>
+                <strong className="text-white">{currentLeader?.name}</strong> leads the championship by{' '}
+                <span className="text-amber-400 font-mono font-bold">
+                  +{houses[1] ? (currentLeader.currentTotal - houses[1].currentTotal).toLocaleString() : 0} pts
+                </span>
               </span>
-            </span>
+            ) : (
+              <span>
+                <strong className="text-white">2026 House Championship Ready</strong> · All 4 houses currently at{' '}
+                <span className="text-emerald-400 font-mono font-bold">0 pts</span>
+              </span>
+            )}
           </div>
         </div>
 
@@ -139,14 +146,18 @@ export const AssemblyIndexView: React.FC = () => {
                 {/* Live Score & Rank above the bar pillar */}
                 <div className="mb-3 flex flex-col items-center text-center transform transition-transform duration-300 group-hover:-translate-y-1">
                   {/* Rank Badge */}
-                  {isFirst ? (
+                  {house.currentTotal > 0 && isFirst ? (
                     <div className="mb-1.5 px-3 py-0.5 rounded-full bg-amber-500/20 border border-amber-400/60 text-amber-300 text-xs font-black flex items-center gap-1.5 shadow-sm">
                       <Trophy className="w-3.5 h-3.5 text-amber-300" />
                       <span>1ST PLACE</span>
                     </div>
-                  ) : (
+                  ) : house.currentTotal > 0 ? (
                     <div className="mb-1.5 px-2.5 py-0.5 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-400 text-[11px] font-bold font-mono">
                       Rank #{house.rank}
+                    </div>
+                  ) : (
+                    <div className="mb-1.5 px-2.5 py-0.5 rounded-full bg-neutral-900/80 border border-neutral-800 text-neutral-400 text-[11px] font-semibold font-mono">
+                      Ready · 0 pts
                     </div>
                   )}
 

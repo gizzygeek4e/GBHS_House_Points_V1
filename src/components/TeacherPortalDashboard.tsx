@@ -46,6 +46,7 @@ export const TeacherPortalDashboard: React.FC = () => {
     removeAuthorizedTeacher,
     resetToDefaultData,
     clearAllPoints,
+    clearTermPoints,
     triggerConfetti,
   } = useHousePoints();
 
@@ -93,8 +94,10 @@ export const TeacherPortalDashboard: React.FC = () => {
   const [isDeletingEvent, setIsDeletingEvent] = useState(false);
 
   // Settings Confirmation Modals State
-  const [showResetConfirm, setShowResetConfirm] = useState(false);
-  const [showClearConfirm, setShowClearConfirm] = useState(false);
+  const [showResetAllConfirm, setShowResetAllConfirm] = useState(false);
+  const [showClearTermConfirm, setShowClearTermConfirm] = useState(false);
+  const [termToReset, setTermToReset] = useState<SchoolTerm>('Term 1');
+  const [isResetting, setIsResetting] = useState(false);
   const [settingsNotice, setSettingsNotice] = useState<string | null>(null);
 
   const quickEventTitles = [
@@ -1322,27 +1325,63 @@ export const TeacherPortalDashboard: React.FC = () => {
               )}
 
               <div className="space-y-4">
-                <div className="p-4 rounded-xl bg-neutral-950 border border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                {/* Reset All Scores to 0 */}
+                <div className="p-4 rounded-xl bg-red-950/20 border border-red-900/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
-                    <h4 className="font-bold text-sm text-white">Reset to Sample GBHS Dataset</h4>
-                    <p className="text-xs text-neutral-400 mt-0.5">
-                      Restores initial sample data for Athletics Day, Swimming Sports, and Haka.
+                    <h4 className="font-bold text-sm text-red-200 flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-red-400" />
+                      <span>Reset All Competition Scores to 0 (Full Reset)</span>
+                    </h4>
+                    <p className="text-xs text-red-300/80 mt-1 leading-relaxed">
+                      Permanently wipes all scoring records in Cloud Firestore. All 4 houses will be set to 0 points across all terms so you can enter actual scores for this school year. Sample data will never reload.
                     </p>
                   </div>
                   <button
-                    onClick={() => setShowResetConfirm(true)}
-                    className="px-3.5 py-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-xs font-semibold text-neutral-200 transition-colors flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
+                    onClick={() => setShowResetAllConfirm(true)}
+                    className="px-4 py-2.5 rounded-lg bg-red-700 hover:bg-red-600 border border-red-600 text-xs font-bold text-white transition-all flex items-center justify-center gap-1.5 shrink-0 shadow-lg cursor-pointer"
                   >
-                    <RotateCcw className="w-3.5 h-3.5 text-neutral-400" />
-                    <span>Reset Data</span>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Reset All Scores to 0</span>
                   </button>
                 </div>
 
+                {/* Reset Specific Term to 0 (e.g. Term 1) */}
+                <div className="p-4 rounded-xl bg-neutral-950 border border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                  <div className="space-y-1">
+                    <h4 className="font-bold text-sm text-white">
+                      Reset Scores for a Specific Term
+                    </h4>
+                    <p className="text-xs text-neutral-400 leading-relaxed">
+                      Select a specific school term (e.g. Term 1) to clear its records to 0 points without affecting other terms.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <select
+                      value={termToReset}
+                      onChange={(e) => setTermToReset(e.target.value as SchoolTerm)}
+                      className="px-3 py-2 bg-neutral-900 border border-neutral-700 rounded-lg text-xs font-semibold text-white focus:outline-none focus:border-red-500 cursor-pointer"
+                    >
+                      <option value="Term 1">Term 1</option>
+                      <option value="Term 2">Term 2</option>
+                      <option value="Term 3">Term 3</option>
+                      <option value="Term 4">Term 4</option>
+                    </select>
+                    <button
+                      onClick={() => setShowClearTermConfirm(true)}
+                      className="px-3.5 py-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 hover:border-neutral-600 text-xs font-semibold text-neutral-200 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <RotateCcw className="w-3.5 h-3.5 text-neutral-400" />
+                      <span>Reset {termToReset} to 0</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Export Official Ledger (CSV) */}
                 <div className="p-4 rounded-xl bg-neutral-950 border border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                   <div>
                     <h4 className="font-bold text-sm text-white">Export Official Ledger (CSV)</h4>
                     <p className="text-xs text-neutral-400 mt-0.5">
-                      Download full spreadsheet archive with timestamps, teachers, and notes.
+                      Download full spreadsheet archive with timestamps, teachers, and notes before resetting.
                     </p>
                   </div>
                   <button
@@ -1350,23 +1389,7 @@ export const TeacherPortalDashboard: React.FC = () => {
                     className="px-3.5 py-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-xs font-semibold text-neutral-200 transition-colors flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
                   >
                     <Download className="w-3.5 h-3.5 text-neutral-400" />
-                    <span>Export CSV</span>
-                  </button>
-                </div>
-
-                <div className="p-4 rounded-xl bg-red-950/20 border border-red-900/40 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div>
-                    <h4 className="font-bold text-sm text-red-200">Start Fresh Competition Term (0 pts)</h4>
-                    <p className="text-xs text-red-300/80 mt-0.5">
-                      Clears all points for all 4 houses to start a brand new term or school year.
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => setShowClearConfirm(true)}
-                    className="px-3.5 py-2 rounded-lg bg-red-950 hover:bg-red-900 border border-red-800 text-xs font-bold text-red-200 transition-colors flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
-                  >
-                    <AlertTriangle className="w-3.5 h-3.5 text-red-400" />
-                    <span>Clear All Points</span>
+                    <span>Export CSV Backup</span>
                   </button>
                 </div>
               </div>
@@ -1433,63 +1456,19 @@ export const TeacherPortalDashboard: React.FC = () => {
         </div>
       )}
 
-      {/* Modal for Resetting to Default Sample Records */}
-      {showResetConfirm && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
-              <div className="flex items-center gap-2 text-neutral-200">
-                <RotateCcw className="w-4 h-4 text-blue-400" />
-                <h3 className="font-bold text-base text-white">Reset to Sample Data</h3>
-              </div>
-              <button
-                onClick={() => setShowResetConfirm(false)}
-                className="text-neutral-400 hover:text-white text-xs p-1 rounded-lg bg-neutral-800 cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <p className="text-xs text-neutral-300 leading-relaxed">
-              This will restore the standard GBHS sample points ledger for Athletics Day, Swimming Sports, and Haka. Any custom events will be replaced.
-            </p>
-
-            <div className="pt-2 flex justify-end gap-2 text-xs">
-              <button
-                type="button"
-                onClick={() => setShowResetConfirm(false)}
-                className="px-3.5 py-2 rounded-lg bg-neutral-800 text-neutral-300 hover:text-white cursor-pointer"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={async () => {
-                  await resetToDefaultData();
-                  setShowResetConfirm(false);
-                  setSettingsNotice('Competition dataset successfully reset to initial sample records.');
-                }}
-                className="px-4 py-2 rounded-lg bg-blue-700 hover:bg-blue-600 text-white font-bold cursor-pointer transition-colors shadow-sm"
-              >
-                Confirm Reset
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal for Clearing All Points */}
-      {showClearConfirm && (
+      {/* Modal for Resetting All Scores to 0 (Full Competition Reset) */}
+      {showResetAllConfirm && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-neutral-900 border border-neutral-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
               <div className="flex items-center gap-2 text-red-400">
                 <AlertTriangle className="w-4 h-4 text-red-400" />
-                <h3 className="font-bold text-base text-white">Clear All Points</h3>
+                <h3 className="font-bold text-base text-white">Reset All Scores to 0</h3>
               </div>
               <button
-                onClick={() => setShowClearConfirm(false)}
-                className="text-neutral-400 hover:text-white text-xs p-1 rounded-lg bg-neutral-800 cursor-pointer"
+                onClick={() => !isResetting && setShowResetAllConfirm(false)}
+                disabled={isResetting}
+                className="text-neutral-400 hover:text-white text-xs p-1 rounded-lg bg-neutral-800 cursor-pointer disabled:opacity-50"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -1497,32 +1476,121 @@ export const TeacherPortalDashboard: React.FC = () => {
 
             <div className="space-y-3 text-xs">
               <p className="text-neutral-300 leading-relaxed">
-                Are you sure you want to clear all points? All 4 houses will be reset to <strong className="text-white">0 points</strong> to begin a brand new term or school year.
+                Are you sure you want to completely reset the competition? All existing scoring records across all terms will be <strong className="text-white">permanently deleted</strong> from Cloud Firestore.
               </p>
+              <div className="p-3 bg-red-950/30 rounded-xl border border-red-900/40 text-red-300 space-y-1">
+                <p className="font-bold text-xs text-red-200">What happens after this reset:</p>
+                <ul className="list-disc list-inside space-y-0.5 text-[11px] text-red-300/90">
+                  <li>All 4 houses will be set to exactly <strong>0 points</strong>.</li>
+                  <li>No sample dummy records will ever reload.</li>
+                  <li>You will have a completely clean slate to log actual 2026 school scores.</li>
+                </ul>
+              </div>
               <p className="text-neutral-400 text-[11px]">
-                Tip: You can download an official CSV backup of the current ledger from this tab before proceeding.
+                Tip: You can export a CSV spreadsheet backup before resetting if needed.
               </p>
             </div>
 
             <div className="pt-2 flex justify-end gap-2 text-xs">
               <button
                 type="button"
-                onClick={() => setShowClearConfirm(false)}
-                className="px-3.5 py-2 rounded-lg bg-neutral-800 text-neutral-300 hover:text-white cursor-pointer"
+                disabled={isResetting}
+                onClick={() => setShowResetAllConfirm(false)}
+                className="px-3.5 py-2 rounded-lg bg-neutral-800 text-neutral-300 hover:text-white cursor-pointer transition-colors disabled:opacity-50"
               >
                 Cancel
               </button>
               <button
                 type="button"
+                disabled={isResetting}
                 onClick={async () => {
-                  await clearAllPoints();
-                  setShowClearConfirm(false);
-                  setSettingsNotice('All points have been cleared. All houses are now at 0 points.');
+                  setIsResetting(true);
+                  try {
+                    await clearAllPoints();
+                    setShowResetAllConfirm(false);
+                    setSettingsNotice('Competition successfully reset: All scores are at 0 points with a clean slate for this year.');
+                  } finally {
+                    setIsResetting(false);
+                  }
                 }}
-                className="px-4 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-white font-bold cursor-pointer transition-colors shadow-sm flex items-center gap-1.5"
+                className="px-4 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-white font-bold cursor-pointer transition-colors shadow-sm flex items-center gap-1.5 disabled:opacity-50"
               >
-                <Trash2 className="w-3.5 h-3.5" />
-                <span>Confirm Clear All</span>
+                {isResetting ? (
+                  <>
+                    <RotateCcw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Resetting to 0...</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>Yes, Reset All to 0</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal for Resetting a Specific Term to 0 (e.g. Term 1) */}
+      {showClearTermConfirm && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
+              <div className="flex items-center gap-2 text-amber-400">
+                <RotateCcw className="w-4 h-4 text-amber-400" />
+                <h3 className="font-bold text-base text-white">Reset {termToReset} Scores to 0</h3>
+              </div>
+              <button
+                onClick={() => !isResetting && setShowClearTermConfirm(false)}
+                disabled={isResetting}
+                className="text-neutral-400 hover:text-white text-xs p-1 rounded-lg bg-neutral-800 cursor-pointer disabled:opacity-50"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <p className="text-neutral-300 leading-relaxed">
+                Delete all scoring records logged under <strong className="text-white">{termToReset}</strong>? All 4 houses will be set to <strong className="text-white">0 points for {termToReset}</strong>. Scores for other terms will remain untouched.
+              </p>
+            </div>
+
+            <div className="pt-2 flex justify-end gap-2 text-xs">
+              <button
+                type="button"
+                disabled={isResetting}
+                onClick={() => setShowClearTermConfirm(false)}
+                className="px-3.5 py-2 rounded-lg bg-neutral-800 text-neutral-300 hover:text-white cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isResetting}
+                onClick={async () => {
+                  setIsResetting(true);
+                  try {
+                    await clearTermPoints(termToReset);
+                    setShowClearTermConfirm(false);
+                    setSettingsNotice(`All scoring records for ${termToReset} have been reset to 0 points.`);
+                  } finally {
+                    setIsResetting(false);
+                  }
+                }}
+                className="px-4 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-white font-bold cursor-pointer transition-colors shadow-sm flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {isResetting ? (
+                  <>
+                    <RotateCcw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Resetting {termToReset}...</span>
+                  </>
+                ) : (
+                  <>
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span>Confirm Reset {termToReset}</span>
+                  </>
+                )}
               </button>
             </div>
           </div>

@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import confetti from 'canvas-confetti';
 import {
   collection,
@@ -25,7 +25,7 @@ import {
   setCachedAccessToken,
 } from '../services/sheetsAuth';
 
-const STORAGE_EVENTS_KEY = 'gbhs_house_points_events_v3';
+const STORAGE_EVENTS_KEY = 'gbhs_house_points_events_v4';
 const STORAGE_AUTH_KEY = 'gbhs_teacher_auth_v3';
 const STORAGE_SHEET_TEACHERS_KEY = 'gbhs_sheet_teachers_v3';
 
@@ -55,6 +55,7 @@ interface HousePointsContextType {
   editPointEvent: (id: string, updated: Partial<PointEvent>) => Promise<void>;
   resetToDefaultData: () => Promise<void>;
   clearAllPoints: () => Promise<void>;
+  clearTermPoints: (term: SchoolTerm) => Promise<void>;
   exportLedgerCSV: () => void;
   audioEnabled: boolean;
   toggleAudio: () => void;
@@ -68,13 +69,21 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   // Navigation View State
   const [currentView, setCurrentView] = useState<AppView>('assembly');
 
-  // Load events (initial local cache or fallback to initial)
+  // Load events (initial local cache or empty until Firestore syncs)
   const [events, setEvents] = useState<PointEvent[]>(() => {
     try {
+      // Clear legacy storage keys so old dummy events never re-surface
+      localStorage.removeItem('gbhs_house_points_events_v3');
+      localStorage.removeItem('gbhs_house_points_events_v2');
+      localStorage.removeItem('gbhs_house_points_events');
+
       const saved = localStorage.getItem(STORAGE_EVENTS_KEY);
-      if (saved) return JSON.parse(saved);
+      if (saved !== null) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
     } catch {}
-    return INITIAL_POINT_EVENTS;
+    return [];
   });
 
   // Authorized teachers loaded from Google Sheet (TEACHERS_26 tab, Column C)
@@ -108,6 +117,9 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const [selectedCategory, setSelectedCategory] = useState<PointCategory | 'All Categories'>('All Categories');
   const [audioEnabled, setAudioEnabled] = useState<boolean>(soundManager.getEnabled());
   const [prevLeaderId, setPrevLeaderId] = useState<HouseId | null>(null);
+
+  // Tracks if the last score update was an award (celebrate only on real awards, never on score deletions or resets)
+  const allowLeadCelebrationRef = useRef<boolean>(false);
 
   // Persist state to local cache for offline instant startup
   useEffect(() => {
@@ -176,17 +188,8 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
       eventsQuery,
       async (snapshot) => {
         if (snapshot.empty) {
-          // If Firestore is fresh and empty, auto-seed initial events
-          try {
-            const batch = writeBatch(db);
-            INITIAL_POINT_EVENTS.forEach((ev) => {
-              const docRef = doc(db, 'pointEvents', ev.id);
-              batch.set(docRef, ev);
-            });
-            await batch.commit();
-          } catch (seedErr) {
-            console.warn('Initial Firestore seed note:', seedErr);
-          }
+          // When Firestore collection is empty (e.g. user cleared points), keep it empty
+          setEvents([]);
           return;
         }
 
@@ -319,14 +322,22 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     } catch {}
   }, []);
 
-  // Leader celebration check
+  // Leader celebration check — strictly only celebrates when points are intentionally awarded,
+  // never when deleting inaccurate scores, clearing points, or editing history.
   useEffect(() => {
     if (computedHouses.length > 0) {
       const leader = computedHouses[0];
-      if (prevLeaderId && prevLeaderId !== leader.id && leader.currentTotal > 0) {
+      if (
+        allowLeadCelebrationRef.current &&
+        prevLeaderId &&
+        prevLeaderId !== leader.id &&
+        leader.currentTotal > 0
+      ) {
         triggerConfetti([leader.primaryColor, leader.secondaryColor, '#ffffff']);
         soundManager.playLeadCelebration();
       }
+      // Reset the award-action flag after processing
+      allowLeadCelebrationRef.current = false;
       setPrevLeaderId(leader.id);
     }
   }, [computedHouses, prevLeaderId, triggerConfetti]);
@@ -549,6 +560,9 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
    * Writes to Cloud Firestore. All connected screens receive live updates instantly.
    */
   const addPoints = async (data: Omit<PointEvent, 'id' | 'timestamp'>) => {
+    // Enable celebration for authentic point award
+    allowLeadCelebrationRef.current = true;
+
     const newEvent: PointEvent = {
       ...data,
       id: 'pe-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
@@ -574,8 +588,12 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   /**
    * DELETE POINT EVENT:
+   * Removes an inaccurate score from history.
+   * Completely silences award fanfares and suppresses confetti.
    */
   const deletePointEvent = async (id: string) => {
+    // Explicitly disallow any celebration or award fanfare when deleting scores
+    allowLeadCelebrationRef.current = false;
     setEvents((prev) => prev.filter((e) => e.id !== id));
     soundManager.playClick();
 
@@ -590,6 +608,7 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
    * EDIT POINT EVENT:
    */
   const editPointEvent = async (id: string, updatedFields: Partial<PointEvent>) => {
+    allowLeadCelebrationRef.current = false;
     setEvents((prev) => prev.map((ev) => (ev.id === id ? { ...ev, ...updatedFields } : ev)));
 
     try {
@@ -600,38 +619,70 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   };
 
   /**
-   * RESET TO DEFAULT DATA:
+   * CLEAR ALL POINTS:
+   * Purges all point events in Firestore so all houses stay at zero (0 pts).
+   * Does not auto-regenerate previous entries.
    */
-  const resetToDefaultData = async () => {
+  const clearAllPoints = async () => {
+    allowLeadCelebrationRef.current = false;
     soundManager.playClick();
-    setEvents(INITIAL_POINT_EVENTS);
+    setEvents([]);
+    try {
+      localStorage.setItem(STORAGE_EVENTS_KEY, JSON.stringify([]));
+      localStorage.removeItem('gbhs_house_points_events_v3');
+      localStorage.removeItem('gbhs_house_points_events_v2');
+      localStorage.removeItem('gbhs_house_points_events');
+    } catch {}
 
     try {
-      const batch = writeBatch(db);
-      INITIAL_POINT_EVENTS.forEach((ev) => {
-        batch.set(doc(db, 'pointEvents', ev.id), ev);
-      });
-      await batch.commit();
+      const snapshot = await getDocs(collection(db, 'pointEvents'));
+      if (!snapshot.empty) {
+        const deletePromises = snapshot.docs.map((d) => deleteDoc(d.ref));
+        await Promise.all(deletePromises);
+      }
     } catch (err) {
-      console.warn('Reset sync warning:', err);
+      console.warn('Clear all sync warning:', err);
+      handleFirestoreError(err, OperationType.DELETE, 'pointEvents');
     }
   };
 
   /**
-   * CLEAR ALL POINTS:
+   * RESET COMPETITION DATA:
+   * Complete reset to 0 points for all houses to start the new school year.
    */
-  const clearAllPoints = async () => {
+  const resetToDefaultData = async () => {
+    await clearAllPoints();
+  };
+
+  /**
+   * CLEAR SPECIFIC TERM SCORES:
+   * Purges all point events for a specific term (e.g. Term 1) from Firestore and local state.
+   */
+  const clearTermPoints = async (termToClear: SchoolTerm) => {
+    allowLeadCelebrationRef.current = false;
     soundManager.playClick();
-    setEvents([]);
+
+    if (termToClear === 'All Year') {
+      await clearAllPoints();
+      return;
+    }
+
+    const nextEvents = events.filter((e) => e.term !== termToClear);
+    setEvents(nextEvents);
+    try {
+      localStorage.setItem(STORAGE_EVENTS_KEY, JSON.stringify(nextEvents));
+    } catch {}
 
     try {
-      const batch = writeBatch(db);
-      events.forEach((ev) => {
-        batch.delete(doc(db, 'pointEvents', ev.id));
-      });
-      await batch.commit();
+      const q = query(collection(db, 'pointEvents'), where('term', '==', termToClear));
+      const snapshot = await getDocs(q);
+      if (!snapshot.empty) {
+        const deletePromises = snapshot.docs.map((d) => deleteDoc(d.ref));
+        await Promise.all(deletePromises);
+      }
     } catch (err) {
-      console.warn('Clear all sync warning:', err);
+      console.warn('Clear term sync warning:', err);
+      handleFirestoreError(err, OperationType.DELETE, `pointEvents?term=${termToClear}`);
     }
   };
 
@@ -692,6 +743,7 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
         editPointEvent,
         resetToDefaultData,
         clearAllPoints,
+        clearTermPoints,
         exportLedgerCSV,
         audioEnabled,
         toggleAudio,

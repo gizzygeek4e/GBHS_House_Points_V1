@@ -165,24 +165,24 @@ export const TeacherPortalDashboard: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#07090e] text-neutral-100 flex flex-col justify-between">
-      {/* Top Staff Header */}
-      <header className="bg-neutral-950/95 border-b border-neutral-800/80 px-4 sm:px-8 py-3.5 sticky top-0 z-30 backdrop-blur-md">
-        <div className="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+      {/* Top Staff Header - Compact & Mobile Responsive */}
+      <header className="bg-neutral-950/95 border-b border-neutral-800/80 px-3 sm:px-8 py-2.5 sm:py-3.5 sticky top-0 z-30 backdrop-blur-md">
+        <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
           {/* Brand & Return Link */}
-          <div className="flex items-center gap-3.5">
+          <div className="flex items-center gap-2 sm:gap-3.5 min-w-0">
             <button
               onClick={() => setCurrentView('assembly')}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-xs font-semibold text-neutral-300 hover:text-white transition-colors"
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-xs font-semibold text-neutral-300 hover:text-white transition-colors shrink-0 cursor-pointer"
             >
               <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Back to Assembly</span>
+              <span className="hidden xs:inline">Assembly</span>
             </button>
 
-            <div className="flex items-center gap-2.5 pl-3 border-l border-neutral-800">
+            <div className="flex items-center gap-2 pl-2 sm:pl-3 border-l border-neutral-800 min-w-0">
               <img
                 src={gbhsHeaderLogo}
                 alt="Gisborne Boys' High School · Toa Hinga Kore, Toa Mate Kore"
-                className="h-10 sm:h-11 w-auto object-contain rounded-md shadow border border-red-700/50 shrink-0"
+                className="h-8 xs:h-9 sm:h-11 w-auto object-contain rounded-md shadow border border-red-700/50 shrink-0"
               />
               <span className="hidden xl:inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-red-950 text-red-300 border border-red-800/60 font-mono">
                 Teacher Scoring Portal
@@ -191,16 +191,16 @@ export const TeacherPortalDashboard: React.FC = () => {
           </div>
 
           {/* Teacher Info & Sign Out */}
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2.5 bg-neutral-900 border border-neutral-800 rounded-xl px-3 py-1.5">
-              <div className="w-7 h-7 rounded-full bg-red-800 text-white flex items-center justify-center font-bold text-xs uppercase shadow-sm">
+          <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+            <div className="flex items-center gap-2 bg-neutral-900 border border-neutral-800 rounded-xl px-2.5 py-1 sm:px-3 sm:py-1.5 max-w-[140px] xs:max-w-[200px] sm:max-w-none">
+              <div className="w-6 h-6 sm:w-7 sm:h-7 rounded-full bg-red-800 text-white flex items-center justify-center font-bold text-[11px] sm:text-xs uppercase shadow-sm shrink-0">
                 {teacherUser?.name?.charAt(0) || 'T'}
               </div>
-              <div className="text-left">
-                <div className="text-xs font-bold text-white leading-tight">
+              <div className="text-left min-w-0 truncate">
+                <div className="text-xs font-bold text-white leading-tight truncate">
                   {teacherUser?.name}
                 </div>
-                <div className="text-[10px] text-neutral-400 font-mono">
+                <div className="text-[9px] sm:text-[10px] text-neutral-400 font-mono truncate hidden xs:block">
                   {teacherUser?.email}
                 </div>
               </div>
@@ -208,7 +208,7 @@ export const TeacherPortalDashboard: React.FC = () => {
 
             <button
               onClick={logoutTeacher}
-              className="p-2 rounded-lg bg-neutral-900 hover:bg-red-950/60 border border-neutral-800 hover:border-red-800 text-neutral-400 hover:text-red-300 transition-colors"
+              className="p-1.5 sm:p-2 rounded-lg bg-neutral-900 hover:bg-red-950/60 border border-neutral-800 hover:border-red-800 text-neutral-400 hover:text-red-300 transition-colors shrink-0 cursor-pointer"
               title="Sign Out"
             >
               <LogOut className="w-4 h-4" />
@@ -218,12 +218,12 @@ export const TeacherPortalDashboard: React.FC = () => {
       </header>
 
       {/* Main Teacher Content Area */}
-      <main className="max-w-7xl mx-auto w-full px-4 sm:px-6 lg:px-8 py-8 flex-1">
-        {/* Navigation Tabs */}
-        <div className="flex items-center gap-2 overflow-x-auto pb-4 mb-6 border-b border-neutral-800 scrollbar-none">
+      <main className="max-w-7xl mx-auto w-full px-3 sm:px-6 lg:px-8 py-4 sm:py-8 flex-1">
+        {/* Navigation Tabs - Horizontal Swipeable on Mobile */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-3 mb-5 sm:mb-6 border-b border-neutral-800 scrollbar-none">
           <button
             onClick={() => setActiveTab('award')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+            className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
               activeTab === 'award'
                 ? 'bg-red-700 text-white shadow-md shadow-red-950/40 border border-red-600'
                 : 'bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800 hover:border-neutral-700'
@@ -235,7 +235,7 @@ export const TeacherPortalDashboard: React.FC = () => {
 
           <button
             onClick={() => setActiveTab('ledger')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+            className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
               activeTab === 'ledger'
                 ? 'bg-red-700 text-white shadow-md shadow-red-950/40 border border-red-600'
                 : 'bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800 hover:border-neutral-700'
@@ -247,7 +247,7 @@ export const TeacherPortalDashboard: React.FC = () => {
 
           <button
             onClick={() => setActiveTab('houses')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+            className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
               activeTab === 'houses'
                 ? 'bg-red-700 text-white shadow-md shadow-red-950/40 border border-red-600'
                 : 'bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800 hover:border-neutral-700'
@@ -259,7 +259,7 @@ export const TeacherPortalDashboard: React.FC = () => {
 
           <button
             onClick={() => setActiveTab('teachers')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+            className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
               activeTab === 'teachers'
                 ? 'bg-red-700 text-white shadow-md shadow-red-950/40 border border-red-600'
                 : 'bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800 hover:border-neutral-700'
@@ -271,7 +271,7 @@ export const TeacherPortalDashboard: React.FC = () => {
 
           <button
             onClick={() => setActiveTab('settings')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+            className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
               activeTab === 'settings'
                 ? 'bg-red-700 text-white shadow-md shadow-red-950/40 border border-red-600'
                 : 'bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800 hover:border-neutral-700'

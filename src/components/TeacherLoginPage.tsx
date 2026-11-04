@@ -44,15 +44,15 @@ export const TeacherLoginPage: React.FC = () => {
   const currentHost = typeof window !== 'undefined' ? window.location.hostname : '';
 
   return (
-    <div className="min-h-screen bg-[#07090e] text-neutral-100 flex flex-col justify-center p-4 sm:p-8">
+    <div className="min-h-screen min-h-[100dvh] bg-[#07090e] text-neutral-100 flex flex-col justify-center px-3 py-4 sm:p-8">
       {/* Top Bar with Back Link */}
-      <div className="max-w-md mx-auto w-full mb-4 flex items-center justify-between">
+      <div className="max-w-md mx-auto w-full mb-3 sm:mb-4 flex items-center justify-between">
         <button
           onClick={() => setCurrentView('assembly')}
-          className="inline-flex items-center gap-2 text-xs font-semibold text-neutral-400 hover:text-white transition-colors cursor-pointer"
+          className="inline-flex items-center gap-1.5 sm:gap-2 text-xs font-semibold text-neutral-400 hover:text-white transition-colors cursor-pointer"
         >
           <ArrowLeft className="w-4 h-4" />
-          <span>Return to Assembly Leaderboard</span>
+          <span>Assembly Leaderboard</span>
         </button>
 
         <button

@@ -79,6 +79,7 @@ export const TeacherPortalDashboard: React.FC = () => {
   const [pasteText, setPasteText] = useState('');
   const [importMode, setImportMode] = useState<'single' | 'paste'>('single');
   const [rosterNotice, setRosterNotice] = useState<string | null>(null);
+  const [addTeacherError, setAddTeacherError] = useState<string | null>(null);
 
   // Edit Teacher Modal State
   const [editingTeacher, setEditingTeacher] = useState<TeacherAccount | null>(null);
@@ -99,6 +100,14 @@ export const TeacherPortalDashboard: React.FC = () => {
   const [termToReset, setTermToReset] = useState<SchoolTerm>('Term 1');
   const [isResetting, setIsResetting] = useState(false);
   const [settingsNotice, setSettingsNotice] = useState<string | null>(null);
+
+  // SuperAdmin permission check (Herman F. or account flagged as isSuperAdmin)
+  const isSuperAdmin =
+    teacherUser?.email?.toLowerCase().trim() === 'hermanf@gisboyshigh.net' ||
+    !!teacherUser?.isSuperAdmin;
+
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const quickEventTitles = [
     'Inter-House Athletics 100m Sprint',
@@ -122,8 +131,9 @@ export const TeacherPortalDashboard: React.FC = () => {
     if (!isNaN(parsed)) setPointsValue(parsed);
   };
 
-  const handleSubmitPoints = (e: React.FormEvent) => {
+  const handleSubmitPoints = async (e: React.FormEvent) => {
     e.preventDefault();
+    setSubmitError(null);
     if (!eventTitle.trim()) {
       alert('Please enter an event or activity description.');
       return;
@@ -133,23 +143,31 @@ export const TeacherPortalDashboard: React.FC = () => {
       return;
     }
 
-    addPoints({
-      houseId: selectedHouse,
-      points: pointsValue,
-      title: eventTitle.trim(),
-      category,
-      term,
-      awardedBy: teacherUser?.name || 'GBHS Staff',
-      notes: notes.trim() || undefined,
-    });
+    setIsSubmitting(true);
+    try {
+      await addPoints({
+        houseId: selectedHouse,
+        points: pointsValue,
+        title: eventTitle.trim(),
+        category,
+        term,
+        awardedBy: teacherUser?.name || 'GBHS Staff',
+        notes: notes.trim() || undefined,
+      });
 
-    setSubmitSuccess(true);
-    setEventTitle('');
-    setNotes('');
+      setSubmitSuccess(true);
+      setEventTitle('');
+      setNotes('');
 
-    setTimeout(() => {
-      setSubmitSuccess(false);
-    }, 2500);
+      setTimeout(() => {
+        setSubmitSuccess(false);
+      }, 3500);
+    } catch (err: any) {
+      console.error('Failed to award points:', err);
+      setSubmitError(err?.message || 'Failed to sync score to Cloud Firestore.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   // Filtered ledger events
@@ -303,6 +321,16 @@ export const TeacherPortalDashboard: React.FC = () => {
                     <p className="text-emerald-300/90 mt-0.5">
                       The live leaderboard and school hall screens have been updated.
                     </p>
+                  </div>
+                </div>
+              )}
+
+              {submitError && (
+                <div className="mb-6 p-4 rounded-xl bg-red-950/80 border border-red-700 text-red-200 text-xs flex items-center gap-3 animate-fadeIn">
+                  <AlertTriangle className="w-5 h-5 text-red-400 shrink-0" />
+                  <div>
+                    <p className="font-bold">Failed to Log Points</p>
+                    <p className="text-red-300/90 mt-0.5">{submitError}</p>
                   </div>
                 </div>
               )}
@@ -466,12 +494,22 @@ export const TeacherPortalDashboard: React.FC = () => {
                 {/* Submit Button */}
                 <button
                   type="submit"
-                  className="w-full py-3.5 px-4 bg-red-700 hover:bg-red-600 text-white rounded-xl text-sm font-bold flex items-center justify-center gap-2 shadow-lg shadow-red-950/50 transition-all"
+                  disabled={isSubmitting}
+                  className="w-full py-3.5 px-4 bg-red-700 hover:bg-red-600 disabled:opacity-50 text-white rounded-xl text-sm font-bold flex items-center justify-center gap-2 shadow-lg shadow-red-950/50 transition-all cursor-pointer"
                 >
-                  <Plus className="w-4 h-4" />
-                  <span>
-                    Award +{pointsValue} Points to {rawHouses[selectedHouse]?.name}
-                  </span>
+                  {isSubmitting ? (
+                    <>
+                      <RotateCcw className="w-4 h-4 animate-spin" />
+                      <span>Syncing Score to Cloud Firestore...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Plus className="w-4 h-4" />
+                      <span>
+                        Award +{pointsValue} Points to {rawHouses[selectedHouse]?.name}
+                      </span>
+                    </>
+                  )}
                 </button>
               </form>
             </div>
@@ -616,14 +654,16 @@ export const TeacherPortalDashboard: React.FC = () => {
                           +{ev.points} pts
                         </span>
 
-                        <button
-                          onClick={() => setEventToDelete(ev)}
-                          className="p-1.5 text-neutral-500 hover:text-red-400 hover:bg-neutral-800 rounded-lg transition-colors cursor-pointer"
-                          title="Delete entry"
-                          aria-label="Delete entry"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
+                        {isSuperAdmin && (
+                          <button
+                            onClick={() => setEventToDelete(ev)}
+                            className="p-1.5 text-neutral-500 hover:text-red-400 hover:bg-neutral-800 rounded-lg transition-colors cursor-pointer"
+                            title="Delete entry"
+                            aria-label="Delete entry"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
                       </div>
                     </div>
                   );
@@ -821,31 +861,38 @@ export const TeacherPortalDashboard: React.FC = () => {
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => {
-                      setRosterNotice(null);
-                      setImportMode('single');
-                      setShowAddTeacherModal(true);
-                    }}
-                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-red-700 hover:bg-red-600 text-white text-xs font-bold transition-colors shadow-sm cursor-pointer"
-                  >
-                    <UserPlus className="w-3.5 h-3.5" />
-                    <span>Add Teacher</span>
-                  </button>
+                {isSuperAdmin ? (
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => {
+                        setRosterNotice(null);
+                        setImportMode('single');
+                        setShowAddTeacherModal(true);
+                      }}
+                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-red-700 hover:bg-red-600 text-white text-xs font-bold transition-colors shadow-sm cursor-pointer"
+                    >
+                      <UserPlus className="w-3.5 h-3.5" />
+                      <span>Add Teacher</span>
+                    </button>
 
-                  <button
-                    onClick={() => {
-                      setRosterNotice(null);
-                      setImportMode('paste');
-                      setShowAddTeacherModal(true);
-                    }}
-                    className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-bold transition-colors border border-neutral-700 cursor-pointer"
-                  >
-                    <Plus className="w-3.5 h-3.5 text-emerald-400" />
-                    <span>Bulk Paste List</span>
-                  </button>
-                </div>
+                    <button
+                      onClick={() => {
+                        setRosterNotice(null);
+                        setImportMode('paste');
+                        setShowAddTeacherModal(true);
+                      }}
+                      className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-bold transition-colors border border-neutral-700 cursor-pointer"
+                    >
+                      <Plus className="w-3.5 h-3.5 text-emerald-400" />
+                      <span>Bulk Paste List</span>
+                    </button>
+                  </div>
+                ) : (
+                  <div className="px-3 py-1.5 rounded-lg bg-neutral-800/80 border border-neutral-700 text-neutral-400 text-xs flex items-center gap-1.5">
+                    <ShieldCheck className="w-3.5 h-3.5 text-neutral-400" />
+                    <span>Read-Only Directory</span>
+                  </div>
+                )}
               </div>
 
               {/* Notice Message */}
@@ -881,7 +928,9 @@ export const TeacherPortalDashboard: React.FC = () => {
                     Staff Accounts ({authorizedTeachers.length})
                   </span>
                   <span className="text-[11px] text-neutral-500">
-                    Modify or remove permissions below
+                    {isSuperAdmin
+                      ? 'Modify or remove permissions below'
+                      : 'Admin-managed staff access (View only)'}
                   </span>
                 </div>
 
@@ -911,37 +960,41 @@ export const TeacherPortalDashboard: React.FC = () => {
                     <div className="flex items-center gap-2 shrink-0">
                       <span className="text-[11px] text-neutral-400 hidden sm:inline mr-1">{t.role}</span>
                       
-                      {/* Modify / Edit Button */}
-                      <button
-                        onClick={() => {
-                          setEditingTeacher(t);
-                          setEditName(t.name);
-                          setEditRole(t.role);
-                        }}
-                        className="p-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-300 hover:text-white transition-colors cursor-pointer"
-                        title={`Modify details for ${t.name}`}
-                        aria-label="Edit Teacher"
-                      >
-                        <Pencil className="w-3.5 h-3.5 text-blue-400" />
-                      </button>
+                      {isSuperAdmin && (
+                        <>
+                          {/* Modify / Edit Button */}
+                          <button
+                            onClick={() => {
+                              setEditingTeacher(t);
+                              setEditName(t.name);
+                              setEditRole(t.role);
+                            }}
+                            className="p-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-300 hover:text-white transition-colors cursor-pointer"
+                            title={`Modify details for ${t.name}`}
+                            aria-label="Edit Teacher"
+                          >
+                            <Pencil className="w-3.5 h-3.5 text-blue-400" />
+                          </button>
 
-                      {/* Remove / Delete Button */}
-                      {t.email.toLowerCase() === 'hermanf@gisboyshigh.net' ? (
-                        <span
-                          className="p-2 rounded-lg text-neutral-600 cursor-not-allowed"
-                          title="SuperAdmin account cannot be removed"
-                        >
-                          <ShieldCheck className="w-3.5 h-3.5 text-neutral-600" />
-                        </span>
-                      ) : (
-                        <button
-                          onClick={() => setTeacherToDelete(t)}
-                          className="p-2 rounded-lg bg-neutral-900 hover:bg-red-950/60 border border-neutral-800 hover:border-red-900/60 text-neutral-400 hover:text-red-300 transition-colors cursor-pointer"
-                          title={`Remove ${t.name}`}
-                          aria-label="Remove Teacher"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                          {/* Remove / Delete Button */}
+                          {t.email.toLowerCase() === 'hermanf@gisboyshigh.net' ? (
+                            <span
+                              className="p-2 rounded-lg text-neutral-600 cursor-not-allowed"
+                              title="SuperAdmin account cannot be removed"
+                            >
+                              <ShieldCheck className="w-3.5 h-3.5 text-neutral-600" />
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => setTeacherToDelete(t)}
+                              className="p-2 rounded-lg bg-neutral-900 hover:bg-red-950/60 border border-neutral-800 hover:border-red-900/60 text-neutral-400 hover:text-red-300 transition-colors cursor-pointer"
+                              title={`Remove ${t.name}`}
+                              aria-label="Remove Teacher"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>
@@ -950,7 +1003,7 @@ export const TeacherPortalDashboard: React.FC = () => {
             </div>
 
             {/* Modal for Adding Teachers */}
-            {showAddTeacherModal && (
+            {showAddTeacherModal && isSuperAdmin && (
               <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
                 <div className="bg-neutral-900 border border-neutral-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4">
                   <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
@@ -958,17 +1011,30 @@ export const TeacherPortalDashboard: React.FC = () => {
                       Add Staff to Cloud Database
                     </h3>
                     <button
-                      onClick={() => setShowAddTeacherModal(false)}
+                      onClick={() => {
+                        setShowAddTeacherModal(false);
+                        setAddTeacherError(null);
+                      }}
                       className="text-neutral-400 hover:text-white text-xs px-2 py-1 rounded bg-neutral-800 cursor-pointer"
                     >
                       <X className="w-4 h-4" />
                     </button>
                   </div>
 
+                  {addTeacherError && (
+                    <div className="p-3 rounded-xl bg-red-950/80 border border-red-700 text-red-200 text-xs flex items-center gap-2">
+                      <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+                      <span>{addTeacherError}</span>
+                    </div>
+                  )}
+
                   <div className="flex gap-2 p-1 bg-neutral-950 rounded-lg">
                     <button
                       type="button"
-                      onClick={() => setImportMode('single')}
+                      onClick={() => {
+                        setImportMode('single');
+                        setAddTeacherError(null);
+                      }}
                       className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors ${
                         importMode === 'single'
                           ? 'bg-neutral-800 text-white'
@@ -979,7 +1045,10 @@ export const TeacherPortalDashboard: React.FC = () => {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setImportMode('paste')}
+                      onClick={() => {
+                        setImportMode('paste');
+                        setAddTeacherError(null);
+                      }}
                       className={`flex-1 py-1.5 text-xs font-semibold rounded-md transition-colors ${
                         importMode === 'paste'
                           ? 'bg-neutral-800 text-white'
@@ -995,7 +1064,7 @@ export const TeacherPortalDashboard: React.FC = () => {
                       onSubmit={(e) => {
                         e.preventDefault();
                         if (!newTeacherEmail.trim() || !newTeacherEmail.includes('@')) {
-                          alert('Please enter a valid Google account email.');
+                          setAddTeacherError('Please enter a valid Google account email.');
                           return;
                         }
                         addAuthorizedTeacher({
@@ -1007,6 +1076,7 @@ export const TeacherPortalDashboard: React.FC = () => {
                         setRosterNotice(`Added ${newTeacherName.trim() || newTeacherEmail.trim()} to the Cloud Firestore database.`);
                         setNewTeacherName('');
                         setNewTeacherEmail('');
+                        setAddTeacherError(null);
                         setShowAddTeacherModal(false);
                       }}
                       className="space-y-3.5 text-xs"
@@ -1020,7 +1090,10 @@ export const TeacherPortalDashboard: React.FC = () => {
                           required
                           placeholder="e.g. Corban"
                           value={newTeacherName}
-                          onChange={(e) => setNewTeacherName(e.target.value)}
+                          onChange={(e) => {
+                            setNewTeacherName(e.target.value);
+                            setAddTeacherError(null);
+                          }}
                           className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 focus:border-red-500 focus:outline-none rounded-lg text-white"
                         />
                       </div>
@@ -1034,7 +1107,10 @@ export const TeacherPortalDashboard: React.FC = () => {
                           required
                           placeholder="e.g. corban@gisboyshigh.net"
                           value={newTeacherEmail}
-                          onChange={(e) => setNewTeacherEmail(e.target.value)}
+                          onChange={(e) => {
+                            setNewTeacherEmail(e.target.value);
+                            setAddTeacherError(null);
+                          }}
                           className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 focus:border-red-500 focus:outline-none rounded-lg text-white font-mono"
                         />
                       </div>
@@ -1055,7 +1131,10 @@ export const TeacherPortalDashboard: React.FC = () => {
                       <div className="pt-2 flex justify-end gap-2">
                         <button
                           type="button"
-                          onClick={() => setShowAddTeacherModal(false)}
+                          onClick={() => {
+                            setShowAddTeacherModal(false);
+                            setAddTeacherError(null);
+                          }}
                           className="px-3.5 py-2 rounded-lg bg-neutral-800 text-neutral-300 hover:text-white cursor-pointer"
                         >
                           Cancel
@@ -1076,14 +1155,20 @@ export const TeacherPortalDashboard: React.FC = () => {
                       <textarea
                         rows={6}
                         value={pasteText}
-                        onChange={(e) => setPasteText(e.target.value)}
+                        onChange={(e) => {
+                          setPasteText(e.target.value);
+                          setAddTeacherError(null);
+                        }}
                         placeholder={`Corban\tSports Lead\tcorban@gisboyshigh.net\nMs. K. Walker\tAquatics Dean\tk.walker@gisboyshigh.net`}
                         className="w-full p-3 bg-neutral-950 border border-neutral-800 focus:border-red-500 focus:outline-none rounded-lg text-white font-mono text-xs"
                       />
                       <div className="flex justify-end gap-2">
                         <button
                           type="button"
-                          onClick={() => setShowAddTeacherModal(false)}
+                          onClick={() => {
+                            setShowAddTeacherModal(false);
+                            setAddTeacherError(null);
+                          }}
                           className="px-3.5 py-2 rounded-lg bg-neutral-800 text-neutral-300 hover:text-white cursor-pointer"
                         >
                           Cancel
@@ -1093,7 +1178,7 @@ export const TeacherPortalDashboard: React.FC = () => {
                           onClick={() => {
                             const parsed = parseTeacherCsv(pasteText);
                             if (parsed.length === 0) {
-                              alert('No valid email addresses found in pasted text.');
+                              setAddTeacherError('No valid email addresses found in pasted text.');
                               return;
                             }
                             const merged = [...authorizedTeachers];
@@ -1108,6 +1193,7 @@ export const TeacherPortalDashboard: React.FC = () => {
                             updateAuthorizedTeachers(merged);
                             setRosterNotice(`Successfully synced ${parsed.length} staff to Cloud Firestore.`);
                             setPasteText('');
+                            setAddTeacherError(null);
                             setShowAddTeacherModal(false);
                           }}
                           className="px-4 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-white font-bold cursor-pointer transition-colors"
@@ -1122,7 +1208,7 @@ export const TeacherPortalDashboard: React.FC = () => {
             )}
 
             {/* Modal for Modifying / Editing Existing Teacher */}
-            {editingTeacher && (
+            {editingTeacher && isSuperAdmin && (
               <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
                 <div className="bg-neutral-900 border border-neutral-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
                   <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
@@ -1222,7 +1308,7 @@ export const TeacherPortalDashboard: React.FC = () => {
               </div>
             )}
             {/* Modal for Deleting Teacher Confirmation */}
-            {teacherToDelete && (
+            {teacherToDelete && isSuperAdmin && (
               <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
                 <div className="bg-neutral-900 border border-neutral-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
                   <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
@@ -1324,82 +1410,113 @@ export const TeacherPortalDashboard: React.FC = () => {
                 </div>
               )}
 
-              <div className="space-y-4">
-                {/* Reset All Scores to 0 */}
-                <div className="p-4 rounded-xl bg-red-950/20 border border-red-900/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div>
-                    <h4 className="font-bold text-sm text-red-200 flex items-center gap-2">
-                      <AlertTriangle className="w-4 h-4 text-red-400" />
-                      <span>Reset All Competition Scores to 0 (Full Reset)</span>
-                    </h4>
-                    <p className="text-xs text-red-300/80 mt-1 leading-relaxed">
-                      Permanently wipes all scoring records in Cloud Firestore. All 4 houses will be set to 0 points across all terms so you can enter actual scores for this school year. Sample data will never reload.
+              {!isSuperAdmin ? (
+                <div className="space-y-4">
+                  <div className="p-6 rounded-xl bg-neutral-950 border border-neutral-800 text-center space-y-3">
+                    <div className="w-12 h-12 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center mx-auto text-neutral-400">
+                      <ShieldCheck className="w-6 h-6 text-red-500" />
+                    </div>
+                    <h3 className="text-base font-bold text-white">Administrator Restricted Area</h3>
+                    <p className="text-xs text-neutral-400 max-w-md mx-auto leading-relaxed">
+                      Competition resets and scoring wipe controls are restricted to the Super Administrator (<span className="text-neutral-200 font-mono">hermanf@gisboyshigh.net</span>).
                     </p>
                   </div>
-                  <button
-                    onClick={() => setShowResetAllConfirm(true)}
-                    className="px-4 py-2.5 rounded-lg bg-red-700 hover:bg-red-600 border border-red-600 text-xs font-bold text-white transition-all flex items-center justify-center gap-1.5 shrink-0 shadow-lg cursor-pointer"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>Reset All Scores to 0</span>
-                  </button>
-                </div>
 
-                {/* Reset Specific Term to 0 (e.g. Term 1) */}
-                <div className="p-4 rounded-xl bg-neutral-950 border border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div className="space-y-1">
-                    <h4 className="font-bold text-sm text-white">
-                      Reset Scores for a Specific Term
-                    </h4>
-                    <p className="text-xs text-neutral-400 leading-relaxed">
-                      Select a specific school term (e.g. Term 1) to clear its records to 0 points without affecting other terms.
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 shrink-0">
-                    <select
-                      value={termToReset}
-                      onChange={(e) => setTermToReset(e.target.value as SchoolTerm)}
-                      className="px-3 py-2 bg-neutral-900 border border-neutral-700 rounded-lg text-xs font-semibold text-white focus:outline-none focus:border-red-500 cursor-pointer"
-                    >
-                      <option value="Term 1">Term 1</option>
-                      <option value="Term 2">Term 2</option>
-                      <option value="Term 3">Term 3</option>
-                      <option value="Term 4">Term 4</option>
-                    </select>
+                  {/* Export Official Ledger (CSV) for staff record */}
+                  <div className="p-4 rounded-xl bg-neutral-950 border border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                      <h4 className="font-bold text-sm text-white">Export Official Ledger (CSV)</h4>
+                      <p className="text-xs text-neutral-400 mt-0.5">
+                        Download spreadsheet archive with full timestamps, teachers, and notes.
+                      </p>
+                    </div>
                     <button
-                      onClick={() => setShowClearTermConfirm(true)}
-                      className="px-3.5 py-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 hover:border-neutral-600 text-xs font-semibold text-neutral-200 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                      onClick={exportLedgerCSV}
+                      className="px-3.5 py-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-xs font-semibold text-neutral-200 transition-colors flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
                     >
-                      <RotateCcw className="w-3.5 h-3.5 text-neutral-400" />
-                      <span>Reset {termToReset} to 0</span>
+                      <Download className="w-3.5 h-3.5 text-neutral-400" />
+                      <span>Export CSV Archive</span>
                     </button>
                   </div>
                 </div>
-
-                {/* Export Official Ledger (CSV) */}
-                <div className="p-4 rounded-xl bg-neutral-950 border border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                  <div>
-                    <h4 className="font-bold text-sm text-white">Export Official Ledger (CSV)</h4>
-                    <p className="text-xs text-neutral-400 mt-0.5">
-                      Download full spreadsheet archive with timestamps, teachers, and notes before resetting.
-                    </p>
+              ) : (
+                <div className="space-y-4">
+                  {/* Reset All Scores to 0 */}
+                  <div className="p-4 rounded-xl bg-red-950/20 border border-red-900/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                      <h4 className="font-bold text-sm text-red-200 flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4 text-red-400" />
+                        <span>Reset All Competition Scores to 0 (Full Reset)</span>
+                      </h4>
+                      <p className="text-xs text-red-300/80 mt-1 leading-relaxed">
+                        Permanently wipes all scoring records in Cloud Firestore. All 4 houses will be set to 0 points across all terms so you can enter actual scores for this school year. Sample data will never reload.
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => setShowResetAllConfirm(true)}
+                      className="px-4 py-2.5 rounded-lg bg-red-700 hover:bg-red-600 border border-red-600 text-xs font-bold text-white transition-all flex items-center justify-center gap-1.5 shrink-0 shadow-lg cursor-pointer"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                      <span>Reset All Scores to 0</span>
+                    </button>
                   </div>
-                  <button
-                    onClick={exportLedgerCSV}
-                    className="px-3.5 py-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-xs font-semibold text-neutral-200 transition-colors flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
-                  >
-                    <Download className="w-3.5 h-3.5 text-neutral-400" />
-                    <span>Export CSV Backup</span>
-                  </button>
+
+                  {/* Reset Specific Term to 0 (e.g. Term 1) */}
+                  <div className="p-4 rounded-xl bg-neutral-950 border border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div className="space-y-1">
+                      <h4 className="font-bold text-sm text-white">
+                        Reset Scores for a Specific Term
+                      </h4>
+                      <p className="text-xs text-neutral-400 leading-relaxed">
+                        Select a specific school term (e.g. Term 1) to clear its records to 0 points without affecting other terms.
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <select
+                        value={termToReset}
+                        onChange={(e) => setTermToReset(e.target.value as SchoolTerm)}
+                        className="px-3 py-2 bg-neutral-900 border border-neutral-700 rounded-lg text-xs font-semibold text-white focus:outline-none focus:border-red-500 cursor-pointer"
+                      >
+                        <option value="Term 1">Term 1</option>
+                        <option value="Term 2">Term 2</option>
+                        <option value="Term 3">Term 3</option>
+                        <option value="Term 4">Term 4</option>
+                      </select>
+                      <button
+                        onClick={() => setShowClearTermConfirm(true)}
+                        className="px-3.5 py-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 hover:border-neutral-600 text-xs font-semibold text-neutral-200 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                      >
+                        <RotateCcw className="w-3.5 h-3.5 text-neutral-400" />
+                        <span>Reset {termToReset} to 0</span>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Export Official Ledger (CSV) */}
+                  <div className="p-4 rounded-xl bg-neutral-950 border border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                    <div>
+                      <h4 className="font-bold text-sm text-white">Export Official Ledger (CSV)</h4>
+                      <p className="text-xs text-neutral-400 mt-0.5">
+                        Download full spreadsheet archive with timestamps, teachers, and notes before resetting.
+                      </p>
+                    </div>
+                    <button
+                      onClick={exportLedgerCSV}
+                      className="px-3.5 py-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-xs font-semibold text-neutral-200 transition-colors flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5 text-neutral-400" />
+                      <span>Export CSV Backup</span>
+                    </button>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         )}
       </main>
 
       {/* Modal for Deleting Ledger Event Confirmation */}
-      {eventToDelete && (
+      {eventToDelete && isSuperAdmin && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-neutral-900 border border-neutral-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
@@ -1457,7 +1574,7 @@ export const TeacherPortalDashboard: React.FC = () => {
       )}
 
       {/* Modal for Resetting All Scores to 0 (Full Competition Reset) */}
-      {showResetAllConfirm && (
+      {showResetAllConfirm && isSuperAdmin && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-neutral-900 border border-neutral-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
@@ -1533,7 +1650,7 @@ export const TeacherPortalDashboard: React.FC = () => {
       )}
 
       {/* Modal for Resetting a Specific Term to 0 (e.g. Term 1) */}
-      {showClearTermConfirm && (
+      {showClearTermConfirm && isSuperAdmin && (
         <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
           <div className="bg-neutral-900 border border-neutral-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
             <div className="flex items-center justify-between pb-3 border-b border-neutral-800">

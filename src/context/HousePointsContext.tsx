@@ -342,8 +342,18 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
   }, [computedHouses, prevLeaderId, triggerConfetti]);
 
-  // Update authorized teachers list in memory and sync to Firestore
+  // Helper to verify if current user is SuperAdmin (Herman F.)
+  const checkIsAdmin = (): boolean => {
+    const email = (teacherUser?.email || auth.currentUser?.email || '').toLowerCase().trim();
+    return email === 'hermanf@gisboyshigh.net' || !!teacherUser?.isSuperAdmin;
+  };
+
+  // Update authorized teachers list in memory and sync to Firestore (Admin Only)
   const updateAuthorizedTeachers = async (newTeachers: TeacherAccount[]) => {
+    if (!checkIsAdmin()) {
+      throw new Error('Unauthorized: Only Admin (hermanf@gisboyshigh.net) can modify staff accounts.');
+    }
+
     setAuthorizedTeachers(newTeachers);
     try {
       const batch = writeBatch(db);
@@ -364,11 +374,16 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
       await batch.commit();
     } catch (err) {
       console.warn('Error saving teachers to Firestore:', err);
+      throw err;
     }
   };
 
-  // Add single authorized teacher
+  // Add single authorized teacher (Admin Only)
   const addAuthorizedTeacher = async (teacher: TeacherAccount) => {
+    if (!checkIsAdmin()) {
+      throw new Error('Unauthorized: Only Admin (hermanf@gisboyshigh.net) can add staff accounts.');
+    }
+
     const cleanEmail = teacher.email.toLowerCase().trim();
     const updated = [
       ...authorizedTeachers.filter((t) => t.email.toLowerCase() !== cleanEmail),
@@ -381,8 +396,12 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     await updateAuthorizedTeachers(updated);
   };
 
-  // Edit / Modify existing teacher details in Cloud Firestore
+  // Edit / Modify existing teacher details in Cloud Firestore (Admin Only)
   const editAuthorizedTeacher = async (email: string, updated: Partial<TeacherAccount>) => {
+    if (!checkIsAdmin()) {
+      throw new Error('Unauthorized: Only Admin (hermanf@gisboyshigh.net) can modify staff accounts.');
+    }
+
     const cleanEmail = email.toLowerCase().trim();
     const docId = cleanEmail.replace(/[^a-zA-Z0-9_-]/g, '_');
 
@@ -404,8 +423,12 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
   };
 
-  // Remove teacher from Cloud Firestore database
+  // Remove teacher from Cloud Firestore database (Admin Only)
   const removeAuthorizedTeacher = async (email: string) => {
+    if (!checkIsAdmin()) {
+      throw new Error('Unauthorized: Only Admin (hermanf@gisboyshigh.net) can remove staff accounts.');
+    }
+
     const cleanEmail = email.toLowerCase().trim();
     if (cleanEmail === 'hermanf@gisboyshigh.net') {
       throw new Error('The SuperAdmin account (hermanf@gisboyshigh.net) cannot be removed.');
@@ -515,6 +538,7 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
         role: teacherRole,
         picture: user.photoURL || undefined,
         isTeacher: true,
+        isSuperAdmin: isOwner || !!matchedTeacher?.isSuperAdmin,
       };
 
       setTeacherUser(authenticatedUser);
@@ -563,67 +587,99 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     // Enable celebration for authentic point award
     allowLeadCelebrationRef.current = true;
 
-    const newEvent: PointEvent = {
-      ...data,
+    const teacherEmail = (
+      teacherUser?.email ||
+      auth.currentUser?.email ||
+      'staff@gisboyshigh.net'
+    ).toLowerCase().trim();
+
+    // Sanitize payload strictly: Never include undefined fields (Firestore will reject undefined)
+    const cleanPayload: Record<string, any> = {
       id: 'pe-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
+      houseId: data.houseId,
+      points: Number(data.points),
+      title: data.title.trim(),
+      category: data.category,
+      term: data.term,
+      awardedBy: data.awardedBy.trim(),
       timestamp: Date.now(),
-      teacherEmail: teacherUser?.email || 'hermanf@gisboyshigh.net',
+      teacherEmail,
     };
 
-    // Optimistically update local view
-    setEvents((prev) => [newEvent, ...prev.filter((e) => e.id !== newEvent.id)]);
+    if (data.notes && data.notes.trim()) {
+      cleanPayload.notes = data.notes.trim();
+    }
 
+    try {
+      await setDoc(doc(db, 'pointEvents', cleanPayload.id), cleanPayload);
+    } catch (err) {
+      console.error('Error writing point event to Firestore:', err);
+      handleFirestoreError(err, OperationType.CREATE, `pointEvents/${cleanPayload.id}`);
+      throw err;
+    }
+
+    // Play sound and launch confetti once write is confirmed to Cloud Firestore
     soundManager.playPointAward(data.points);
     const house = INITIAL_HOUSES[data.houseId];
     if (house) {
       triggerConfetti([house.primaryColor, house.secondaryColor, '#ffffff']);
     }
-
-    try {
-      await setDoc(doc(db, 'pointEvents', newEvent.id), newEvent);
-    } catch (err) {
-      handleFirestoreError(err, OperationType.CREATE, `pointEvents/${newEvent.id}`);
-    }
   };
 
   /**
-   * DELETE POINT EVENT:
+   * DELETE POINT EVENT (Admin Only):
    * Removes an inaccurate score from history.
-   * Completely silences award fanfares and suppresses confetti.
+   * Restricted strictly to Admin (hermanf@gisboyshigh.net).
    */
   const deletePointEvent = async (id: string) => {
+    if (!checkIsAdmin()) {
+      throw new Error('Unauthorized: Only Admin (hermanf@gisboyshigh.net) can delete scoring entries.');
+    }
+
     // Explicitly disallow any celebration or award fanfare when deleting scores
     allowLeadCelebrationRef.current = false;
-    setEvents((prev) => prev.filter((e) => e.id !== id));
     soundManager.playClick();
 
     try {
       await deleteDoc(doc(db, 'pointEvents', id));
+      setEvents((prev) => prev.filter((e) => e.id !== id));
     } catch (err) {
+      console.error('Error deleting point event from Firestore:', err);
       handleFirestoreError(err, OperationType.DELETE, `pointEvents/${id}`);
+      throw err;
     }
   };
 
   /**
-   * EDIT POINT EVENT:
+   * EDIT POINT EVENT (Admin Only):
    */
   const editPointEvent = async (id: string, updatedFields: Partial<PointEvent>) => {
+    if (!checkIsAdmin()) {
+      throw new Error('Unauthorized: Only Admin (hermanf@gisboyshigh.net) can modify scoring entries.');
+    }
+
     allowLeadCelebrationRef.current = false;
     setEvents((prev) => prev.map((ev) => (ev.id === id ? { ...ev, ...updatedFields } : ev)));
 
     try {
       await updateDoc(doc(db, 'pointEvents', id), updatedFields);
     } catch (err) {
+      console.error('Error updating point event in Firestore:', err);
       handleFirestoreError(err, OperationType.UPDATE, `pointEvents/${id}`);
+      throw err;
     }
   };
 
   /**
-   * CLEAR ALL POINTS:
+   * CLEAR ALL POINTS (Admin Only):
    * Purges all point events in Firestore so all houses stay at zero (0 pts).
    * Does not auto-regenerate previous entries.
    */
   const clearAllPoints = async () => {
+    if (!checkIsAdmin()) {
+      throw new Error('Unauthorized: Only Admin (hermanf@gisboyshigh.net) can reset competition scores.');
+    }
+
     allowLeadCelebrationRef.current = false;
     soundManager.playClick();
     setEvents([]);
@@ -643,11 +699,12 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     } catch (err) {
       console.warn('Clear all sync warning:', err);
       handleFirestoreError(err, OperationType.DELETE, 'pointEvents');
+      throw err;
     }
   };
 
   /**
-   * RESET COMPETITION DATA:
+   * RESET COMPETITION DATA (Admin Only):
    * Complete reset to 0 points for all houses to start the new school year.
    */
   const resetToDefaultData = async () => {
@@ -655,10 +712,14 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   };
 
   /**
-   * CLEAR SPECIFIC TERM SCORES:
+   * CLEAR SPECIFIC TERM SCORES (Admin Only):
    * Purges all point events for a specific term (e.g. Term 1) from Firestore and local state.
    */
   const clearTermPoints = async (termToClear: SchoolTerm) => {
+    if (!checkIsAdmin()) {
+      throw new Error('Unauthorized: Only Admin (hermanf@gisboyshigh.net) can reset term scores.');
+    }
+
     allowLeadCelebrationRef.current = false;
     soundManager.playClick();
 
@@ -683,6 +744,7 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     } catch (err) {
       console.warn('Clear term sync warning:', err);
       handleFirestoreError(err, OperationType.DELETE, `pointEvents?term=${termToClear}`);
+      throw err;
     }
   };
 

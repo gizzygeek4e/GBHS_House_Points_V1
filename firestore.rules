@@ -16,6 +16,12 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function isAdmin() {
+      return request.auth != null
+        && request.auth.token.email != null
+        && request.auth.token.email.matches('(?i)^hermanf@gisboyshigh\\.net$');
+    }
+
     function isValidHouseId(houseId) {
       return houseId in ['tawhirimatea', 'tumatauenga', 'tangaroa', 'tanemahuta'];
     }
@@ -55,22 +61,26 @@ service cloud.firestore {
 
     // Point Events Collection:
     // Public read for assembly hall screens, mobile phones, and community leaderboard.
-    // Writes are validated strictly by schema and payload boundaries.
+    // Creating scoring entries is permitted for valid point events.
+    // Deleting or modifying ledger events is strictly restricted to Admin (Herman F.).
     match /pointEvents/{eventId} {
       allow read: if true;
       allow create: if isValidId(eventId) && isValidPointEvent(request.resource.data);
       allow update: if isValidId(eventId)
+        && isAdmin()
         && isValidPointEvent(request.resource.data)
         && request.resource.data.id == resource.data.id;
-      allow delete: if isValidId(eventId);
+      allow delete: if isValidId(eventId) && isAdmin();
     }
 
     // Authorized Teachers Collection:
     // Holds the directory of school teachers synced directly with Cloud Firestore.
+    // Read is public so login verification works.
+    // Adding, modifying, or removing staff members is strictly restricted to Admin (Herman F.).
     match /authorizedTeachers/{teacherId} {
       allow read: if true;
-      allow create, update: if isValidTeacherId(teacherId) && isValidAuthorizedTeacher(request.resource.data);
-      allow delete: if isValidTeacherId(teacherId);
+      allow create, update: if isValidTeacherId(teacherId) && isAdmin() && isValidAuthorizedTeacher(request.resource.data);
+      allow delete: if isValidTeacherId(teacherId) && isAdmin();
     }
   }
 }

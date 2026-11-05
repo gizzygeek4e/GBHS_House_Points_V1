@@ -27,6 +27,7 @@ import { parseTeacherCsv } from '../services/sheetsAuth';
 import gbhsHeaderLogo from '../assets/gbhs_header_logo.png';
 import gbhsCrest from '../assets/gbhs_crest.png';
 import { HouseCrestImage } from './HouseCrestImage';
+import { PWAInstallButton } from './PWAInstallButton';
 
 export const TeacherPortalDashboard: React.FC = () => {
   const {
@@ -1396,6 +1397,11 @@ export const TeacherPortalDashboard: React.FC = () => {
                 <p className="text-xs text-neutral-400 mt-0.5">
                   Manage school competition datasets, terms, and fresh starts.
                 </p>
+              </div>
+
+              {/* Mobile App PWA Install Card */}
+              <div className="mb-6">
+                <PWAInstallButton variant="card" />
               </div>
 
               {settingsNotice && (

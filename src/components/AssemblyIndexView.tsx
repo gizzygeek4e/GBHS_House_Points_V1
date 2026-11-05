@@ -5,6 +5,7 @@ import { SchoolTerm } from '../types';
 
 import gbhsHeaderLogo from '../assets/gbhs_header_logo.png';
 import { HouseCrestImage } from './HouseCrestImage';
+import { PWAInstallButton } from './PWAInstallButton';
 
 export const AssemblyIndexView: React.FC = () => {
   const {
@@ -86,6 +87,9 @@ export const AssemblyIndexView: React.FC = () => {
                 <VolumeX className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-neutral-500" />
               )}
             </button>
+
+            {/* PWA In-App Mobile Install Button */}
+            <PWAInstallButton variant="compact" />
 
             {/* Teacher Login / Portal Button */}
             {teacherUser ? (

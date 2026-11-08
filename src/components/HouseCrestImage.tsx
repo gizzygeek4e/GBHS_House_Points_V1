@@ -1,10 +1,10 @@
 import React, { useState } from 'react';
 import { HouseId } from '../types';
-import tawhirimateaCrest from '../assets/houses/TAWHIRIMATEA_transparent.png';
-import tumatauengaCrest from '../assets/houses/TUMATAUENGA_transparent.png';
-import tangaroaCrest from '../assets/houses/TANGAROA_transparent.png';
-import tanemahutaCrest from '../assets/houses/TANE_MAHUTA_transparent.png';
-import gbhsCrest from '../assets/gbhs_crest.png';
+import tawhirimateaCrest from '../assets/houses/tawhirimatea.svg';
+import tumatauengaCrest from '../assets/houses/tumatauenga.svg';
+import tangaroaCrest from '../assets/houses/tangaroa.svg';
+import tanemahutaCrest from '../assets/houses/tanemahuta.svg';
+import gbhsCrest from '../assets/gbhs_crest_logo.svg';
 
 const BUNDLED_CRESTS: Record<string, string> = {
   tawhirimatea: tawhirimateaCrest,
@@ -14,10 +14,10 @@ const BUNDLED_CRESTS: Record<string, string> = {
 };
 
 const PUBLIC_CRESTS: Record<string, string> = {
-  tawhirimatea: 'assets/houses/TAWHIRIMATEA_transparent.png',
-  tumatauenga: 'assets/houses/TUMATAUENGA_transparent.png',
-  tangaroa: 'assets/houses/TANGAROA_transparent.png',
-  tanemahuta: 'assets/houses/TANE_MAHUTA_transparent.png',
+  tawhirimatea: 'assets/houses/tawhirimatea.svg',
+  tumatauenga: 'assets/houses/tumatauenga.svg',
+  tangaroa: 'assets/houses/tangaroa.svg',
+  tanemahuta: 'assets/houses/tanemahuta.svg',
 };
 
 interface HouseCrestImageProps extends React.ImgHTMLAttributes<HTMLImageElement> {

@@ -12,10 +12,14 @@ export default defineConfig(() => {
       VitePWA({
         registerType: 'autoUpdate',
         includeAssets: [
+          'favicon.svg',
           'favicon.png',
           'apple-touch-icon.png',
-          'assets/gbhs_crest.png',
-          'assets/gbhs_header_logo.png',
+          'assets/gbhs_crest_logo.svg',
+          'assets/houses/tawhirimatea.svg',
+          'assets/houses/tumatauenga.svg',
+          'assets/houses/tangaroa.svg',
+          'assets/houses/tanemahuta.svg',
         ],
         manifest: {
           id: '/',

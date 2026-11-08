@@ -201,6 +201,17 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
         setEvents(liveEvents);
       },
       (error) => {
+        const isUnavailable =
+          error.code === 'unavailable' ||
+          error.message?.includes('offline') ||
+          error.message?.includes('Could not reach Cloud Firestore') ||
+          error.message?.includes('backend. Connection failed');
+
+        if (isUnavailable) {
+          console.warn('Real-time points sync operating with offline cache:', error.message);
+          return;
+        }
+
         console.error('Real-time points sync error:', error);
         handleFirestoreError(error, OperationType.GET, 'pointEvents');
       }

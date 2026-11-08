@@ -1,13 +1,19 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { initializeFirestore, doc, getDocFromServer } from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 // Initialize Firebase App
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore with custom database ID from config
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+// Initialize Firestore with auto-detect long polling for reliable connectivity across mobile networks and proxies
+export const db = initializeFirestore(
+  app,
+  {
+    experimentalAutoDetectLongPolling: true,
+  },
+  firebaseConfig.firestoreDatabaseId
+);
 
 // Initialize Firebase Auth
 export const auth = getAuth(app);
@@ -39,8 +45,28 @@ export interface FirestoreErrorInfo {
 }
 
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errMsg = error instanceof Error ? error.message : String(error);
+  const errCode = (error as any)?.code || '';
+
+  // Handle transient offline or connection drops gracefully without crashing the applet
+  const isNetworkUnavailable =
+    errCode === 'unavailable' ||
+    errMsg.includes('offline') ||
+    errMsg.includes('Could not reach Cloud Firestore') ||
+    errMsg.includes('backend. Connection failed');
+
+  const isPermissionError =
+    errCode === 'permission-denied' ||
+    errMsg.includes('permission') ||
+    errMsg.includes('Permission');
+
+  if (isNetworkUnavailable && !isPermissionError) {
+    console.warn(`Firestore operating in offline/cached mode for ${operationType} on ${path}:`, errMsg);
+    return;
+  }
+
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errMsg,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
@@ -62,12 +88,13 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 // Test connection on boot as recommended in Firebase guidelines
 export async function testFirestoreConnection(): Promise<boolean> {
   try {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      return false;
+    }
     await getDocFromServer(doc(db, 'pointEvents', 'connection-check'));
     return true;
   } catch (error) {
-    if (error instanceof Error && error.message.includes('the client is offline')) {
-      console.warn('Firestore offline:', error.message);
-    }
+    // Offline/unavailable connections are handled gracefully by Firestore's local cache
     return false;
   }
 }

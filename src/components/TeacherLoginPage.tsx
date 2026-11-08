@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 import { useHousePoints } from '../context/HousePointsContext';
 
-import gbhsHeaderLogo from '../assets/gbhs_header_logo.png';
+import gbhsCrestLogo from '../assets/gbhs_crest_logo.svg';
 
 export const TeacherLoginPage: React.FC = () => {
   const {
@@ -73,10 +73,16 @@ export const TeacherLoginPage: React.FC = () => {
           {/* Official School Header & Logo */}
           <div className="text-center mb-6">
             <img
-              src={gbhsHeaderLogo}
+              src={gbhsCrestLogo}
               alt="Gisborne Boys' High School · Toa Hinga Kore, Toa Mate Kore"
-              className="h-16 w-auto mx-auto object-contain rounded-xl shadow-lg border border-red-700/50 mb-3"
+              className="h-20 w-auto mx-auto object-contain rounded-xl shadow-lg border border-red-600/50 mb-3"
             />
+            <h1 className="font-extrabold text-xl sm:text-2xl tracking-tight text-[#ed1c24] font-display leading-tight">
+              Gisborne Boys&apos; High School
+            </h1>
+            <p className="text-xs sm:text-sm text-white font-medium mt-1 mb-3">
+              Toa hinga kore, toa mate kore.
+            </p>
             <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-red-950/80 border border-red-800/60 text-xs font-bold text-red-300">
               <Lock className="w-3.5 h-3.5" />
               <span>Teacher Scoring Portal</span>

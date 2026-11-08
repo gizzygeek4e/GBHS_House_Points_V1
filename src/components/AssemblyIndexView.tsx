@@ -3,7 +3,7 @@ import { Trophy, Sparkles, Volume2, VolumeX, ShieldCheck, UserCheck, ArrowRight,
 import { useHousePoints } from '../context/HousePointsContext';
 import { SchoolTerm } from '../types';
 
-import gbhsHeaderLogo from '../assets/gbhs_header_logo.png';
+import gbhsCrestLogo from '../assets/gbhs_crest_logo.svg';
 import { HouseCrestImage } from './HouseCrestImage';
 import { PWAInstallButton } from './PWAInstallButton';
 
@@ -28,19 +28,19 @@ export const AssemblyIndexView: React.FC = () => {
       {/* Top Header Strip - Mobile Optimized Single-Line Flow */}
       <header className="bg-neutral-950/90 border-b border-neutral-800/80 px-2.5 xs:px-4 sm:px-8 py-2 xs:py-2.5 sm:py-3.5 backdrop-blur-md sticky top-0 z-30">
         <div className="max-w-7xl mx-auto flex items-center justify-between gap-2 sm:gap-4">
-          {/* School Brand Lockup with Official Logo, Header & Sub Header */}
+          {/* School Brand Lockup with Official Logo (Image 1), Header & Sub Header */}
           <div className="flex items-center gap-2 sm:gap-3.5 shrink-0">
             <img
-              src={gbhsHeaderLogo}
+              src={gbhsCrestLogo}
               alt="Gisborne Boys' High School · Toa Hinga Kore, Toa Mate Kore"
-              className="h-8 xs:h-9 sm:h-11 md:h-12 w-auto object-contain rounded-md shadow-sm border border-red-700/50 shrink-0"
+              className="h-8 xs:h-9 sm:h-11 md:h-12 w-auto object-contain rounded-lg shadow-sm border border-red-600/50 shrink-0"
             />
-            <div className="hidden lg:flex flex-col justify-center border-l border-neutral-800 pl-3">
-              <span className="font-extrabold text-xs uppercase tracking-wider text-white font-display">
-                House Championship
+            <div className="flex flex-col justify-center border-l border-neutral-800 pl-2.5 sm:pl-3">
+              <span className="font-extrabold text-xs xs:text-sm sm:text-base md:text-lg tracking-tight text-[#ed1c24] font-display leading-tight">
+                Gisborne Boys&apos; High School
               </span>
-              <span className="text-[10px] text-red-400 font-mono font-bold">
-                Live Assembly Display
+              <span className="text-[9px] xs:text-[10px] sm:text-xs text-white font-medium tracking-normal leading-tight opacity-95">
+                Toa hinga kore, toa mate kore.
               </span>
             </div>
           </div>
@@ -190,16 +190,17 @@ export const AssemblyIndexView: React.FC = () => {
 
                 {/* Vertical Stadium Pillar Track */}
                 <div className="w-full max-w-[95px] xs:max-w-[125px] sm:max-w-[190px] md:max-w-[215px] lg:max-w-[235px] bg-neutral-950/80 rounded-t-xl sm:rounded-t-2xl border sm:border-2 border-neutral-800/80 p-0.5 sm:p-1 flex flex-col justify-end h-48 xs:h-56 sm:h-72 md:h-84 lg:h-96 shadow-2xl overflow-hidden">
-                  {/* Animated Rising Bar Pillar */}
+                  {/* Animated Rising Bar Pillar — exact match to house logo background */}
                   <div
-                    className={`w-full rounded-lg sm:rounded-xl bg-gradient-to-t ${house.barGradient} transition-all duration-1000 ease-out relative flex flex-col items-center justify-start overflow-hidden pt-0.5 sm:pt-1`}
+                    className="w-full rounded-lg sm:rounded-xl transition-all duration-1000 ease-out relative flex flex-col items-center justify-start overflow-hidden pt-0.5 sm:pt-1"
                     style={{
                       height: `${percentage}%`,
-                      boxShadow: `0 0 20px ${house.primaryColor}55`,
+                      backgroundColor: house.primaryColor,
+                      boxShadow: `0 0 25px ${house.primaryColor}66`,
                     }}
                   >
                     {/* Top glass highlight bar */}
-                    <div className="absolute inset-x-0 top-0 h-1 sm:h-2 bg-white/40" />
+                    <div className="absolute inset-x-0 top-0 h-1 sm:h-2 bg-white/20 pointer-events-none" />
 
                     {/* EMBEDDED HOUSE LOGO — Responsive width to full width with 10px padding on desktop, 6px-8px on mobile */}
                     <div className="w-full p-1.5 xs:p-2 sm:p-[10px] relative z-10 flex items-center justify-center shrink-0">
@@ -207,7 +208,7 @@ export const AssemblyIndexView: React.FC = () => {
                         houseId={house.id}
                         houseName={house.name}
                         src={house.crest}
-                        className="w-full h-auto object-contain filter drop-shadow-[0_2px_8px_rgba(0,0,0,0.7)] select-none pointer-events-none transition-transform duration-300 group-hover:scale-105"
+                        className="w-full h-auto object-contain rounded-md sm:rounded-lg filter drop-shadow-[0_2px_8px_rgba(0,0,0,0.5)] select-none pointer-events-none transition-transform duration-300 group-hover:scale-105"
                       />
                     </div>
                   </div>
@@ -216,7 +217,7 @@ export const AssemblyIndexView: React.FC = () => {
                 {/* Base Podium Banner */}
                 <div
                   className="w-full max-w-[95px] xs:max-w-[125px] sm:max-w-[190px] md:max-w-[215px] lg:max-w-[235px] py-1.5 xs:py-2 sm:py-3 text-center border-t-2 sm:border-t-4 bg-neutral-950 rounded-b-lg sm:rounded-b-xl shadow-lg px-0.5"
-                  style={{ borderTopColor: house.borderStroke }}
+                  style={{ borderTopColor: house.primaryColor }}
                 >
                   <h2 className="font-extrabold text-[10px] xs:text-xs sm:text-sm md:text-base text-white font-display truncate">
                     {house.name}

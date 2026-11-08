@@ -24,8 +24,7 @@ import {
 import { useHousePoints } from '../context/HousePointsContext';
 import { HouseId, PointCategory, SchoolTerm, TeacherAccount, PointEvent } from '../types';
 import { parseTeacherCsv } from '../services/sheetsAuth';
-import gbhsHeaderLogo from '../assets/gbhs_header_logo.png';
-import gbhsCrest from '../assets/gbhs_crest.png';
+import gbhsCrestLogo from '../assets/gbhs_crest_logo.svg';
 import { HouseCrestImage } from './HouseCrestImage';
 import { PWAInstallButton } from './PWAInstallButton';
 
@@ -199,11 +198,19 @@ export const TeacherPortalDashboard: React.FC = () => {
 
             <div className="flex items-center gap-2 pl-2 sm:pl-3 border-l border-neutral-800 min-w-0">
               <img
-                src={gbhsHeaderLogo}
+                src={gbhsCrestLogo}
                 alt="Gisborne Boys' High School · Toa Hinga Kore, Toa Mate Kore"
-                className="h-8 xs:h-9 sm:h-11 w-auto object-contain rounded-md shadow border border-red-700/50 shrink-0"
+                className="h-8 xs:h-9 sm:h-11 w-auto object-contain rounded-lg shadow border border-red-600/50 shrink-0"
               />
-              <span className="hidden xl:inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-red-950 text-red-300 border border-red-800/60 font-mono">
+              <div className="flex flex-col justify-center min-w-0">
+                <span className="font-extrabold text-xs sm:text-sm tracking-tight text-[#ed1c24] font-display leading-tight truncate">
+                  Gisborne Boys&apos; High School
+                </span>
+                <span className="text-[9px] sm:text-[11px] text-white font-medium tracking-normal leading-tight truncate">
+                  Toa hinga kore, toa mate kore.
+                </span>
+              </div>
+              <span className="hidden xl:inline-block px-2 py-0.5 rounded text-[10px] font-bold bg-red-950 text-red-300 border border-red-800/60 font-mono ml-1 shrink-0">
                 Teacher Scoring Portal
               </span>
             </div>

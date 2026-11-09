@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   ArrowLeft,
   PlusCircle,
@@ -20,9 +20,30 @@ import {
   Database,
   ShieldCheck,
   X,
+  ArrowUp,
+  ArrowDown,
+  Star,
+  Trophy,
+  Lock,
+  Tag,
+  Users,
+  UserCheck,
+  CheckSquare,
+  Square,
+  Filter,
+  GraduationCap,
 } from 'lucide-react';
 import { useHousePoints } from '../context/HousePointsContext';
-import { HouseId, PointCategory, SchoolTerm, TeacherAccount, PointEvent } from '../types';
+import {
+  HouseId,
+  PointCategory,
+  SchoolTerm,
+  TeacherAccount,
+  PointEvent,
+  Competition,
+  AllowedScoreOption,
+  Student,
+} from '../types';
 import { parseTeacherCsv } from '../services/sheetsAuth';
 import gbhsCrestLogo from '../assets/gbhs_crest_logo.svg';
 import { HouseCrestImage } from './HouseCrestImage';
@@ -48,20 +69,158 @@ export const TeacherPortalDashboard: React.FC = () => {
     clearAllPoints,
     clearTermPoints,
     triggerConfetti,
+    competitions,
+    students,
+    addCompetition,
+    updateCompetition,
+    deleteCompetition,
+    reorderCompetitions,
+    setCompetitionAsCurrent,
+    moveCompetition,
   } = useHousePoints();
 
   // Active Tab
   const [activeTab, setActiveTab] = useState<'award' | 'ledger' | 'houses' | 'teachers' | 'settings'>('award');
 
+  // SuperAdmin permission check (Herman F. or account flagged as isSuperAdmin)
+  const isSuperAdmin =
+    teacherUser?.email?.toLowerCase().trim() === 'hermanf@gisboyshigh.net' ||
+    !!teacherUser?.isSuperAdmin;
+
+  // Selected Competition state (defaults to top-ranked competition, i.e. order 0)
+  const [selectedCompId, setSelectedCompId] = useState<string>('');
+
+  // Active competition object
+  const activeCompetition = useMemo(() => {
+    if (!competitions || competitions.length === 0) return null;
+    return competitions.find((c) => c.id === selectedCompId) || competitions[0];
+  }, [competitions, selectedCompId]);
+
   // Award Points Form State
   const [selectedHouse, setSelectedHouse] = useState<HouseId>('tumatauenga');
-  const [pointsValue, setPointsValue] = useState<number>(50);
-  const [customPoints, setCustomPoints] = useState<string>('50');
+  const [pointsValue, setPointsValue] = useState<number>(100);
+  const [customPoints, setCustomPoints] = useState<string>('100');
   const [eventTitle, setEventTitle] = useState('');
   const [category, setCategory] = useState<PointCategory>('Sports & Athletics');
   const [term, setTerm] = useState<'Term 1' | 'Term 2' | 'Term 3' | 'Term 4'>('Term 1');
   const [notes, setNotes] = useState('');
   const [submitSuccess, setSubmitSuccess] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // Student Recipient Selection State
+  const [selectedStudentIds, setSelectedStudentIds] = useState<string[]>([]);
+  const [rosterSourceMode, setRosterSourceMode] = useState<'competition' | 'whole_school'>('competition');
+  const [studentSearch, setStudentSearch] = useState('');
+  const [studentYearFilter, setStudentYearFilter] = useState<number | 'all'>('all');
+
+  // Sync competition changes to form fields and roster mode
+  useEffect(() => {
+    if (activeCompetition) {
+      if (!selectedCompId || selectedCompId !== activeCompetition.id) {
+        setSelectedCompId(activeCompetition.id);
+      }
+      setCategory(activeCompetition.category);
+      if (activeCompetition.term && activeCompetition.term !== 'All Year') {
+        setTerm(activeCompetition.term as any);
+      }
+      // If competition specifies custom roster and has student IDs, default to competition roster mode; otherwise whole school
+      if (
+        activeCompetition.recipientMode === 'custom_roster' &&
+        activeCompetition.customStudentIds &&
+        activeCompetition.customStudentIds.length > 0
+      ) {
+        setRosterSourceMode('competition');
+      } else {
+        setRosterSourceMode('whole_school');
+      }
+      // Reset selected students on competition change
+      setSelectedStudentIds([]);
+
+      // If current pointsValue is not in the allowed scores of this competition, pick the first allowed score
+      const hasAllowed = activeCompetition.allowedScores.some((s) => s.points === pointsValue);
+      if (!hasAllowed && activeCompetition.allowedScores.length > 0) {
+        const firstScore = activeCompetition.allowedScores[0];
+        setPointsValue(firstScore.points);
+        setCustomPoints(firstScore.points.toString());
+        if (!eventTitle.trim()) {
+          const labelSuffix = firstScore.label ? ` · ${firstScore.label}` : '';
+          setEventTitle(`${activeCompetition.name}${labelSuffix}`);
+        }
+      }
+    }
+  }, [activeCompetition]);
+
+  // Students belonging to currently selected house
+  const houseStudents = useMemo(() => {
+    return (students || []).filter((s) => s.houseId === selectedHouse);
+  }, [students, selectedHouse]);
+
+  // Custom competition participant IDs that belong to the current house
+  const competitionHouseStudentIds = useMemo(() => {
+    const customIds = activeCompetition?.customStudentIds || [];
+    return customIds.filter((id) => houseStudents.some((s) => s.id === id));
+  }, [activeCompetition, houseStudents]);
+
+  // Filtered students displayed in Section 3 Checkbox Space
+  const displayedStudents = useMemo(() => {
+    let list = houseStudents;
+
+    if (rosterSourceMode === 'competition') {
+      if (activeCompetition?.customStudentIds && activeCompetition.customStudentIds.length > 0) {
+        list = list.filter((s) => activeCompetition.customStudentIds!.includes(s.id));
+      }
+    }
+
+    if (studentYearFilter !== 'all') {
+      list = list.filter((s) => s.yearLevel === studentYearFilter);
+    }
+
+    if (studentSearch.trim()) {
+      const q = studentSearch.trim().toLowerCase();
+      list = list.filter(
+        (s) =>
+          s.name.toLowerCase().includes(q) ||
+          (s.tutorGroup && s.tutorGroup.toLowerCase().includes(q)) ||
+          `year ${s.yearLevel}`.includes(q)
+      );
+    }
+
+    return list;
+  }, [houseStudents, rosterSourceMode, activeCompetition, studentYearFilter, studentSearch]);
+
+  const toggleStudentSelection = (studentId: string) => {
+    setSelectedStudentIds((prev) =>
+      prev.includes(studentId) ? prev.filter((id) => id !== studentId) : [...prev, studentId]
+    );
+  };
+
+  const handleSelectAllFilteredStudents = () => {
+    const ids = displayedStudents.map((s) => s.id);
+    setSelectedStudentIds((prev) => Array.from(new Set([...prev, ...ids])));
+  };
+
+  const handleClearStudentSelection = () => {
+    setSelectedStudentIds([]);
+  };
+
+  const selectedStudents = useMemo(() => {
+    return (students || []).filter((s) => selectedStudentIds.includes(s.id));
+  }, [students, selectedStudentIds]);
+
+  const selectedStudentNames = useMemo(() => {
+    return selectedStudents.map((s) => s.name);
+  }, [selectedStudents]);
+
+  // Handler for selecting an allowed competition score tier
+  const handleSelectScoreOption = (score: AllowedScoreOption) => {
+    setPointsValue(score.points);
+    setCustomPoints(score.points.toString());
+    if (activeCompetition) {
+      const labelSuffix = score.label ? ` · ${score.label}` : '';
+      setEventTitle(`${activeCompetition.name}${labelSuffix}`);
+    }
+  };
 
   // Ledger Filter & Search
   const [searchQuery, setSearchQuery] = useState('');
@@ -86,7 +245,7 @@ export const TeacherPortalDashboard: React.FC = () => {
   const [editName, setEditName] = useState('');
   const [editRole, setEditRole] = useState('');
 
-  // Delete Teacher Modal State (In-app modal avoiding browser window.confirm blocks)
+  // Delete Teacher Modal State
   const [teacherToDelete, setTeacherToDelete] = useState<TeacherAccount | null>(null);
   const [isDeletingTeacher, setIsDeletingTeacher] = useState(false);
 
@@ -101,13 +260,211 @@ export const TeacherPortalDashboard: React.FC = () => {
   const [isResetting, setIsResetting] = useState(false);
   const [settingsNotice, setSettingsNotice] = useState<string | null>(null);
 
-  // SuperAdmin permission check (Herman F. or account flagged as isSuperAdmin)
-  const isSuperAdmin =
-    teacherUser?.email?.toLowerCase().trim() === 'hermanf@gisboyshigh.net' ||
-    !!teacherUser?.isSuperAdmin;
+  // Admin Competitions Management State
+  const [showAddCompModal, setShowAddCompModal] = useState(false);
+  const [editingComp, setEditingComp] = useState<Competition | null>(null);
+  const [compToDelete, setCompToDelete] = useState<Competition | null>(null);
+  const [isDeletingComp, setIsDeletingComp] = useState(false);
+  const [isSavingComp, setIsSavingComp] = useState(false);
+  const [compFormError, setCompFormError] = useState<string | null>(null);
 
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  // Add/Edit Competition Form Fields
+  const [compName, setCompName] = useState('');
+  const [compCategory, setCompCategory] = useState<PointCategory>('Sports & Athletics');
+  const [compTerm, setCompTerm] = useState<SchoolTerm>('Term 1');
+  const [compDescription, setCompDescription] = useState('');
+  const [compIsActive, setCompIsActive] = useState(true);
+  const [compAllowedScores, setCompAllowedScores] = useState<AllowedScoreOption[]>([
+    { points: 100, label: '1st Place' },
+    { points: 75, label: '2nd Place' },
+    { points: 50, label: '3rd Place' },
+    { points: 25, label: '4th Place' },
+    { points: 10, label: 'Participation' },
+  ]);
+  const [newScorePoints, setNewScorePoints] = useState('');
+  const [newScoreLabel, setNewScoreLabel] = useState('');
+  const [compRecipientMode, setCompRecipientMode] = useState<'whole_school' | 'custom_roster'>('whole_school');
+  const [compCustomStudentIds, setCompCustomStudentIds] = useState<string[]>([]);
+  const [compStudentSearch, setCompStudentSearch] = useState('');
+
+  const openAddCompModal = () => {
+    setCompName('');
+    setCompCategory('Sports & Athletics');
+    setCompTerm('Term 1');
+    setCompDescription('');
+    setCompIsActive(true);
+    setCompAllowedScores([
+      { points: 100, label: '1st Place' },
+      { points: 75, label: '2nd Place' },
+      { points: 50, label: '3rd Place' },
+      { points: 25, label: '4th Place' },
+      { points: 10, label: 'Participation' },
+    ]);
+    setNewScorePoints('');
+    setNewScoreLabel('');
+    setCompRecipientMode('whole_school');
+    setCompCustomStudentIds([]);
+    setCompStudentSearch('');
+    setCompFormError(null);
+    setShowAddCompModal(true);
+  };
+
+  const openEditCompModal = (comp: Competition) => {
+    setEditingComp(comp);
+    setCompName(comp.name);
+    setCompCategory(comp.category);
+    setCompTerm(comp.term);
+    setCompDescription(comp.description || '');
+    setCompIsActive(comp.isActive);
+    setCompAllowedScores([...comp.allowedScores]);
+    setNewScorePoints('');
+    setNewScoreLabel('');
+    setCompRecipientMode(comp.recipientMode || 'whole_school');
+    setCompCustomStudentIds(comp.customStudentIds || []);
+    setCompStudentSearch('');
+    setCompFormError(null);
+  };
+
+  const handleToggleCompCustomStudent = (studentId: string) => {
+    setCompCustomStudentIds((prev) =>
+      prev.includes(studentId) ? prev.filter((id) => id !== studentId) : [...prev, studentId]
+    );
+  };
+
+  const handleAddScoreTier = () => {
+    const pts = parseInt(newScorePoints.trim(), 10);
+    if (isNaN(pts) || pts <= 0) {
+      setCompFormError('Please enter a valid positive number for points.');
+      return;
+    }
+    const label = newScoreLabel.trim() || undefined;
+    setCompAllowedScores([...compAllowedScores, { points: pts, label }]);
+    setNewScorePoints('');
+    setNewScoreLabel('');
+    setCompFormError(null);
+  };
+
+  const handleRemoveScoreTier = (index: number) => {
+    setCompAllowedScores(compAllowedScores.filter((_, i) => i !== index));
+  };
+
+  const applyScorePreset = (presetType: 'placings' | 'trophy' | 'academic' | 'merits') => {
+    if (presetType === 'placings') {
+      setCompAllowedScores([
+        { points: 100, label: '1st Place' },
+        { points: 75, label: '2nd Place' },
+        { points: 50, label: '3rd Place' },
+        { points: 25, label: '4th Place' },
+        { points: 10, label: 'Participation / Entry' },
+      ]);
+    } else if (presetType === 'trophy') {
+      setCompAllowedScores([
+        { points: 150, label: '1st Place Trophy' },
+        { points: 100, label: '2nd Place' },
+        { points: 75, label: '3rd Place' },
+        { points: 50, label: '4th Place' },
+      ]);
+    } else if (presetType === 'academic') {
+      setCompAllowedScores([
+        { points: 80, label: '1st Place' },
+        { points: 60, label: '2nd Place' },
+        { points: 40, label: '3rd Place' },
+        { points: 20, label: '4th Place' },
+      ]);
+    } else if (presetType === 'merits') {
+      setCompAllowedScores([
+        { points: 50, label: 'Excellence (Gold)' },
+        { points: 30, label: 'Commendation (Silver)' },
+        { points: 15, label: 'Merit Award' },
+        { points: 5, label: 'Weekly Tutor Check' },
+      ]);
+    }
+  };
+
+  const handleSaveNewCompetition = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setCompFormError(null);
+    if (!compName.trim()) {
+      setCompFormError('Please enter a competition name.');
+      return;
+    }
+    if (compAllowedScores.length === 0) {
+      setCompFormError('Please configure at least one allowed score tier.');
+      return;
+    }
+
+    setIsSavingComp(true);
+    try {
+      await addCompetition({
+        name: compName.trim(),
+        category: compCategory,
+        term: compTerm,
+        description: compDescription.trim() || undefined,
+        isActive: compIsActive,
+        allowedScores: compAllowedScores,
+        recipientMode: compRecipientMode,
+        customStudentIds: compRecipientMode === 'custom_roster' ? compCustomStudentIds : [],
+        order: competitions.length,
+      });
+      setShowAddCompModal(false);
+      setSettingsNotice(`Successfully created competition "${compName.trim()}"!`);
+      setTimeout(() => setSettingsNotice(null), 4000);
+    } catch (err: any) {
+      setCompFormError(err?.message || 'Failed to save competition.');
+    } finally {
+      setIsSavingComp(false);
+    }
+  };
+
+  const handleSaveEditedCompetition = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingComp) return;
+    setCompFormError(null);
+    if (!compName.trim()) {
+      setCompFormError('Please enter a competition name.');
+      return;
+    }
+    if (compAllowedScores.length === 0) {
+      setCompFormError('Please configure at least one allowed score tier.');
+      return;
+    }
+
+    setIsSavingComp(true);
+    try {
+      await updateCompetition(editingComp.id, {
+        name: compName.trim(),
+        category: compCategory,
+        term: compTerm,
+        description: compDescription.trim() || undefined,
+        isActive: compIsActive,
+        allowedScores: compAllowedScores,
+        recipientMode: compRecipientMode,
+        customStudentIds: compRecipientMode === 'custom_roster' ? compCustomStudentIds : [],
+      });
+      setEditingComp(null);
+      setSettingsNotice(`Successfully updated competition "${compName.trim()}"!`);
+      setTimeout(() => setSettingsNotice(null), 4000);
+    } catch (err: any) {
+      setCompFormError(err?.message || 'Failed to update competition.');
+    } finally {
+      setIsSavingComp(false);
+    }
+  };
+
+  const handleConfirmDeleteCompetition = async () => {
+    if (!compToDelete) return;
+    setIsDeletingComp(true);
+    try {
+      await deleteCompetition(compToDelete.id);
+      setCompToDelete(null);
+      setSettingsNotice(`Competition removed.`);
+      setTimeout(() => setSettingsNotice(null), 3000);
+    } catch (err: any) {
+      alert(`Failed to delete competition: ${err?.message}`);
+    } finally {
+      setIsDeletingComp(false);
+    }
+  };
 
   const quickEventTitles = [
     'Inter-House Athletics 100m Sprint',
@@ -145,19 +502,28 @@ export const TeacherPortalDashboard: React.FC = () => {
 
     setIsSubmitting(true);
     try {
+      const activeCat = activeCompetition ? activeCompetition.category : category;
+      const activeTerm =
+        activeCompetition && activeCompetition.term !== 'All Year'
+          ? (activeCompetition.term as any)
+          : term;
+
       await addPoints({
         houseId: selectedHouse,
         points: pointsValue,
         title: eventTitle.trim(),
-        category,
-        term,
+        category: activeCat,
+        term: activeTerm,
         awardedBy: teacherUser?.name || 'GBHS Staff',
         notes: notes.trim() || undefined,
-      });
+        studentRecipients: selectedStudentNames.length > 0 ? selectedStudentNames : undefined,
+        competitionId: activeCompetition?.id,
+      } as any);
 
       setSubmitSuccess(true);
       setEventTitle('');
       setNotes('');
+      setSelectedStudentIds([]);
 
       setTimeout(() => {
         setSubmitSuccess(false);
@@ -295,17 +661,23 @@ export const TeacherPortalDashboard: React.FC = () => {
             <span>Staff Directory ({authorizedTeachers.length})</span>
           </button>
 
-          <button
-            onClick={() => setActiveTab('settings')}
-            className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
-              activeTab === 'settings'
-                ? 'bg-red-700 text-white shadow-md shadow-red-950/40 border border-red-600'
-                : 'bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800 hover:border-neutral-700'
-            }`}
-          >
-            <Settings className="w-3.5 h-3.5" />
-            <span>Competition Controls</span>
-          </button>
+          {/* Hidden Admin-Only Tab: Competition Controls */}
+          {isSuperAdmin && (
+            <button
+              onClick={() => setActiveTab('settings')}
+              className={`flex items-center gap-2 px-3.5 sm:px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap shrink-0 cursor-pointer ${
+                activeTab === 'settings'
+                  ? 'bg-red-700 text-white shadow-md shadow-red-950/40 border border-red-600'
+                  : 'bg-neutral-900 text-neutral-400 hover:text-white border border-neutral-800 hover:border-neutral-700'
+              }`}
+            >
+              <Settings className="w-3.5 h-3.5 text-amber-400" />
+              <span>Competition Controls</span>
+              <span className="px-1.5 py-0.5 rounded text-[9px] bg-red-950 text-red-300 font-mono border border-red-800">
+                Admin
+              </span>
+            </button>
+          )}
         </div>
 
         {/* TAB 1: AWARD POINTS DESK */}
@@ -313,12 +685,26 @@ export const TeacherPortalDashboard: React.FC = () => {
           <div className="max-w-3xl mx-auto">
             <div className="bg-neutral-900/80 border border-neutral-800 rounded-2xl p-6 sm:p-8 shadow-xl">
               <div className="mb-6 pb-4 border-b border-neutral-800">
-                <h2 className="text-xl font-bold text-white font-display">
-                  Award House Competition Points
-                </h2>
-                <p className="text-xs text-neutral-400 mt-0.5">
-                  Points awarded here update the live Assembly Display instantly across all school screens.
-                </p>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <h2 className="text-xl font-bold text-white font-display">
+                      Award House Competition Points
+                    </h2>
+                    <p className="text-xs text-neutral-400 mt-0.5">
+                      Select the competition and official points tier. Updates the live Assembly Display instantly across all school screens.
+                    </p>
+                  </div>
+                  {isSuperAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('settings')}
+                      className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-neutral-950 hover:bg-neutral-800 border border-neutral-700 text-[11px] font-semibold text-neutral-300 self-start sm:self-auto cursor-pointer"
+                    >
+                      <Settings className="w-3 h-3 text-amber-400" />
+                      <span>Manage Defaults</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
               {submitSuccess && (
@@ -344,131 +730,437 @@ export const TeacherPortalDashboard: React.FC = () => {
               )}
 
               <form onSubmit={handleSubmitPoints} className="space-y-6">
-                {/* 1. House Selector */}
+                {/* 1. COMPETITION (FIRST OPTION!) */}
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400 mb-2.5">
-                    1. Recipient School House
-                  </label>
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                    {(Object.keys(rawHouses) as HouseId[]).map((id) => {
-                      const house = rawHouses[id];
-                      const isSelected = selectedHouse === id;
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400">
+                      1. School Competition
+                    </label>
+                    {activeCompetition && (
+                      <span className="text-[11px] text-neutral-400 font-mono">
+                        {competitions.findIndex((c) => c.id === activeCompetition.id) === 0 ? (
+                          <span className="text-amber-400 font-bold flex items-center gap-1">
+                            <Star className="w-3 h-3 fill-amber-400" /> Current Primary Competition
+                          </span>
+                        ) : (
+                          `Competition #${competitions.findIndex((c) => c.id === activeCompetition.id) + 1}`
+                        )}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Competition Main Dropdown */}
+                  <div className="relative mb-2.5">
+                    <select
+                      value={selectedCompId}
+                      onChange={(e) => setSelectedCompId(e.target.value)}
+                      aria-label="Select School Competition"
+                      className="w-full bg-neutral-950 border border-neutral-700 focus:border-red-500 rounded-xl px-3.5 py-3 text-sm font-semibold text-white focus:outline-none cursor-pointer shadow-sm appearance-none"
+                    >
+                      {competitions.map((comp, idx) => (
+                        <option key={comp.id} value={comp.id} className="bg-neutral-900 text-white py-1">
+                          {idx === 0 ? `⭐ ${comp.name} [Current Top]` : `${idx + 1}. ${comp.name}`} ({comp.category} · {comp.term})
+                        </option>
+                      ))}
+                    </select>
+                    <div className="absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none text-neutral-400 text-xs">
+                      ▼
+                    </div>
+                  </div>
+
+                  {/* Quick Select Chips for Active Competitions */}
+                  <div className="flex flex-wrap items-center gap-1.5 mb-3">
+                    <span className="text-[11px] text-neutral-500 mr-1 font-medium">Quick switch:</span>
+                    {competitions.slice(0, 5).map((comp, idx) => {
+                      const isCompSelected = (activeCompetition?.id || '') === comp.id;
                       return (
                         <button
-                          key={id}
+                          key={comp.id}
                           type="button"
-                          onClick={() => setSelectedHouse(id)}
-                          className={`p-3 rounded-xl border flex flex-col items-center text-center transition-all ${
-                            isSelected
-                              ? 'bg-neutral-950 border-white ring-2 ring-red-600 scale-[1.02]'
-                              : 'bg-neutral-950/60 border-neutral-800 hover:border-neutral-700 opacity-80 hover:opacity-100'
+                          onClick={() => setSelectedCompId(comp.id)}
+                          className={`text-[11px] px-2.5 py-1 rounded-lg border font-medium transition-colors cursor-pointer ${
+                            isCompSelected
+                              ? 'bg-red-950/80 text-red-200 border-red-700 font-bold'
+                              : 'bg-neutral-950 text-neutral-400 hover:text-white border-neutral-800 hover:border-neutral-700'
                           }`}
                         >
-                          <div
-                            className="w-12 h-12 p-1 rounded-xl bg-neutral-900 border mb-2"
-                            style={{ borderColor: house.borderStroke }}
-                          >
-                            <img
-                              src={house.crest}
-                              alt={house.name}
-                              className="w-full h-full object-contain"
-                              loading="eager"
-                            />
-                          </div>
-                          <span className="font-bold text-xs text-white font-display truncate w-full">
-                            {house.name}
-                          </span>
-                          <span className="text-[10px] text-neutral-400 truncate w-full">
-                            {house.colorName} · {house.currentTotal} pts
-                          </span>
+                          {idx === 0 && '⭐ '}
+                          {comp.name}
                         </button>
                       );
                     })}
                   </div>
+
+                  {/* Active Competition Info Banner */}
+                  {activeCompetition && (
+                    <div className="p-3.5 rounded-xl bg-neutral-950 border border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 text-xs">
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-bold text-white text-sm">
+                            {activeCompetition.name}
+                          </span>
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-neutral-900 text-neutral-300 border border-neutral-800">
+                            {activeCompetition.category}
+                          </span>
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-neutral-900 text-neutral-300 border border-neutral-800">
+                            {activeCompetition.term}
+                          </span>
+                        </div>
+                        {activeCompetition.description && (
+                          <p className="text-neutral-400 text-[11px] mt-1 leading-relaxed">
+                            {activeCompetition.description}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
-                {/* 2. Points Amount */}
+                {/* 2. POINTS AMOUNT (LIMITED TO DEFAULTS PER COMPETITION) */}
                 <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400 mb-2">
-                    2. Points Amount
-                  </label>
-                  <div className="flex flex-wrap items-center gap-2 mb-2">
-                    {[10, 25, 50, 75, 100, 150].map((val) => (
-                      <button
-                        key={val}
-                        type="button"
-                        onClick={() => handlePointPreset(val)}
-                        className={`px-3 py-1.5 text-xs font-bold font-mono rounded-lg border transition-colors ${
-                          pointsValue === val
-                            ? 'bg-red-700 text-white border-red-500'
-                            : 'bg-neutral-950 text-neutral-300 border-neutral-800 hover:border-neutral-700'
-                        }`}
-                      >
-                        +{val}
-                      </button>
-                    ))}
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400">
+                      2. Points to Award (Official Competition Defaults)
+                    </label>
+                    <span className="text-[11px] text-neutral-400 font-mono">
+                      Selected: <strong className="text-white font-bold font-mono">+{pointsValue} pts</strong>
+                    </span>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <span className="text-xs text-neutral-400">Custom points:</span>
-                    <input
-                      type="number"
-                      min="1"
-                      max="1000"
-                      value={customPoints}
-                      onChange={handleCustomPointsChange}
-                      className="w-28 bg-neutral-950 border border-neutral-800 rounded-lg px-3 py-1.5 text-xs text-white font-mono font-bold focus:outline-none focus:border-red-600"
-                    />
-                    <span className="text-xs text-neutral-400">points</span>
+
+                  {/* Allowed Score Buttons configured for this competition */}
+                  {activeCompetition && activeCompetition.allowedScores && activeCompetition.allowedScores.length > 0 ? (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2.5">
+                      {activeCompetition.allowedScores.map((score, sIdx) => {
+                        const isScoreSelected = pointsValue === score.points;
+                        return (
+                          <button
+                            key={sIdx}
+                            type="button"
+                            onClick={() => handleSelectScoreOption(score)}
+                            className={`p-3 rounded-xl border flex flex-col items-center justify-center text-center transition-all cursor-pointer ${
+                              isScoreSelected
+                                ? 'bg-red-700 text-white border-red-500 shadow-md ring-2 ring-red-500/50 scale-[1.02]'
+                                : 'bg-neutral-950 text-neutral-300 border-neutral-800 hover:border-neutral-700 hover:bg-neutral-900'
+                            }`}
+                          >
+                            <span className="font-mono font-extrabold text-lg leading-tight">
+                              +{score.points}
+                            </span>
+                            <span
+                              className={`text-[11px] mt-1 truncate max-w-full font-medium ${
+                                isScoreSelected ? 'text-red-100' : 'text-neutral-400'
+                              }`}
+                            >
+                              {score.label || `${score.points} Points`}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="p-3 bg-neutral-950 border border-neutral-800 rounded-xl text-neutral-400 text-xs">
+                      No custom defaults defined for this event. Using standard 50 pts default.
+                    </div>
+                  )}
+
+                  {/* FAIR PLAY NOTICE - CUSTOM POINTS DISABLED FOR TEACHERS */}
+                  <div className="flex items-center gap-2 p-2.5 rounded-xl bg-neutral-950/70 border border-neutral-800/80 text-[11px] text-neutral-400 mt-2.5">
+                    <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                    <span>
+                      Scores are locked to official competition defaults to guarantee fair play across all houses. Custom scores are disabled.
+                    </span>
                   </div>
                 </div>
 
-                {/* 3. Category & Term */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* 3. RECIPIENT SCHOOL HOUSE & STUDENT NAME SELECTOR */}
+                <div className="space-y-4">
                   <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400 mb-1.5">
-                      Competition Category
-                    </label>
-                    <select
-                      value={category}
-                      onChange={(e) => setCategory(e.target.value as PointCategory)}
-                      className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-red-600"
-                    >
-                      <option value="Sports & Athletics">Sports & Athletics</option>
-                      <option value="Academic & STEM">Academic & STEM</option>
-                      <option value="Kaupapa Māori & Haka">Kaupapa Māori & Haka</option>
-                      <option value="Arts & Cultural">Arts & Cultural</option>
-                      <option value="Attendance & Merits">Attendance & Merits</option>
-                    </select>
+                    <div className="flex items-center justify-between mb-2.5">
+                      <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400">
+                        3. Recipient School House & Student Recipients
+                      </label>
+                      <span className="text-[11px] text-neutral-400 font-mono">
+                        House: <strong className="text-white font-bold">{rawHouses[selectedHouse]?.name}</strong>
+                      </span>
+                    </div>
+
+                    {/* House Selection Cards */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                      {(Object.keys(rawHouses) as HouseId[]).map((id) => {
+                        const house = rawHouses[id];
+                        const isSelected = selectedHouse === id;
+                        return (
+                          <button
+                            key={id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedHouse(id);
+                              setSelectedStudentIds([]);
+                            }}
+                            className={`p-3 rounded-xl border flex flex-col items-center text-center transition-all cursor-pointer ${
+                              isSelected
+                                ? 'bg-neutral-950 border-white ring-2 ring-red-600 scale-[1.02]'
+                                : 'bg-neutral-950/60 border-neutral-800 hover:border-neutral-700 opacity-80 hover:opacity-100'
+                            }`}
+                          >
+                            <div
+                              className="w-12 h-12 p-1 rounded-xl bg-neutral-900 border mb-2"
+                              style={{ borderColor: house.borderStroke }}
+                            >
+                              <img
+                                src={house.crest}
+                                alt={house.name}
+                                className="w-full h-full object-contain"
+                                loading="eager"
+                              />
+                            </div>
+                            <span className="font-bold text-xs text-white font-display truncate w-full">
+                              {house.name}
+                            </span>
+                            <span className="text-[10px] text-neutral-400 truncate w-full">
+                              {house.colorName} · {house.currentTotal} pts
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
 
-                  <div>
-                    <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400 mb-1.5">
-                      School Term
-                    </label>
-                    <select
-                      value={term}
-                      onChange={(e) => setTerm(e.target.value as any)}
-                      className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-3.5 py-2.5 text-xs text-white focus:outline-none focus:border-red-600"
-                    >
-                      <option value="Term 1">Term 1</option>
-                      <option value="Term 2">Term 2</option>
-                      <option value="Term 3">Term 3</option>
-                      <option value="Term 4">Term 4</option>
-                    </select>
+                  {/* Student Name Selector Checkbox Space */}
+                  <div className="p-4 rounded-xl bg-neutral-950 border border-neutral-800 space-y-3">
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-2.5 border-b border-neutral-800/80">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <Users className="w-4 h-4 text-red-500" />
+                          <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                            Student Name Selector
+                          </h4>
+                          <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-neutral-900 text-neutral-300 border border-neutral-800">
+                            {rawHouses[selectedHouse]?.name}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-neutral-400 mt-0.5">
+                          Select one or multiple students to award points to, or award to the entire house squad.
+                        </p>
+                      </div>
+
+                      {/* Recipient Roster Mode Toggle */}
+                      <div className="flex items-center gap-1 bg-neutral-900 p-1 rounded-lg border border-neutral-800 self-start sm:self-auto">
+                        <button
+                          type="button"
+                          onClick={() => setRosterSourceMode('competition')}
+                          className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                            rosterSourceMode === 'competition'
+                              ? 'bg-red-700 text-white shadow-sm font-bold'
+                              : 'text-neutral-400 hover:text-white'
+                          }`}
+                        >
+                          <Trophy className="w-3 h-3" />
+                          <span>Competition Squad ({competitionHouseStudentIds.length})</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setRosterSourceMode('whole_school')}
+                          className={`px-2.5 py-1 rounded text-[11px] font-semibold transition-all cursor-pointer flex items-center gap-1.5 ${
+                            rosterSourceMode === 'whole_school'
+                              ? 'bg-red-700 text-white shadow-sm font-bold'
+                              : 'text-neutral-400 hover:text-white'
+                          }`}
+                        >
+                          <GraduationCap className="w-3 h-3" />
+                          <span>Whole Student Population ({houseStudents.length})</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Filter Bar: Search, Year Pills, Select/Clear Buttons */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pt-1">
+                      {/* Search Input */}
+                      <div className="relative flex-1">
+                        <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none" />
+                        <input
+                          type="text"
+                          value={studentSearch}
+                          onChange={(e) => setStudentSearch(e.target.value)}
+                          placeholder={`Search ${rawHouses[selectedHouse]?.name} students by name or tutor...`}
+                          className="w-full bg-neutral-900 border border-neutral-800 focus:border-red-600 rounded-lg pl-8 pr-8 py-1.5 text-xs text-white placeholder-neutral-500 focus:outline-none"
+                        />
+                        {studentSearch && (
+                          <button
+                            type="button"
+                            onClick={() => setStudentSearch('')}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-neutral-400 hover:text-white"
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Year Level Filter Pills */}
+                      <div className="flex items-center gap-1 overflow-x-auto pb-1 sm:pb-0 scrollbar-none">
+                        <span className="text-[10px] text-neutral-500 font-semibold mr-0.5">Year:</span>
+                        {(['all', 9, 10, 11, 12, 13] as const).map((yr) => (
+                          <button
+                            key={yr}
+                            type="button"
+                            onClick={() => setStudentYearFilter(yr)}
+                            className={`px-2 py-0.5 rounded text-[10px] font-semibold border transition-colors cursor-pointer ${
+                              studentYearFilter === yr
+                                ? 'bg-red-950 text-red-200 border-red-700'
+                                : 'bg-neutral-900 text-neutral-400 hover:text-white border-neutral-800'
+                            }`}
+                          >
+                            {yr === 'all' ? 'All' : `Y${yr}`}
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Bulk Selection Actions */}
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={handleSelectAllFilteredStudents}
+                          disabled={displayedStudents.length === 0}
+                          className="px-2 py-1 rounded bg-neutral-900 hover:bg-neutral-800 disabled:opacity-40 border border-neutral-800 text-[10px] font-semibold text-neutral-300 hover:text-white transition-colors cursor-pointer"
+                        >
+                          Select All ({displayedStudents.length})
+                        </button>
+                        {selectedStudentIds.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={handleClearStudentSelection}
+                            className="px-2 py-1 rounded bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-[10px] font-semibold text-red-400 hover:text-red-300 transition-colors cursor-pointer"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Checkbox Students List Space */}
+                    <div className="mt-2">
+                      {displayedStudents.length === 0 ? (
+                        <div className="p-4 rounded-lg bg-neutral-900/50 border border-neutral-800/80 text-center text-xs text-neutral-400 space-y-1.5">
+                          <p>
+                            {rosterSourceMode === 'competition' && competitionHouseStudentIds.length === 0
+                              ? `No specific participants registered for ${rawHouses[selectedHouse]?.name} in this competition squad yet.`
+                              : 'No students found matching your search filter.'}
+                          </p>
+                          {rosterSourceMode === 'competition' && (
+                            <button
+                              type="button"
+                              onClick={() => setRosterSourceMode('whole_school')}
+                              className="inline-flex items-center gap-1 text-[11px] text-red-400 hover:text-red-300 font-semibold cursor-pointer underline"
+                            >
+                              Switch to Whole Student Population ({houseStudents.length} students)
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 max-h-56 overflow-y-auto pr-1">
+                          {displayedStudents.map((st) => {
+                            const isChecked = selectedStudentIds.includes(st.id);
+                            return (
+                              <label
+                                key={st.id}
+                                className={`flex items-center justify-between p-2.5 rounded-lg border text-xs cursor-pointer select-none transition-all ${
+                                  isChecked
+                                    ? 'bg-red-950/40 border-red-600/90 ring-1 ring-red-600/60'
+                                    : 'bg-neutral-900/70 border-neutral-800 hover:border-neutral-700 hover:bg-neutral-900'
+                                }`}
+                              >
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={() => toggleStudentSelection(st.id)}
+                                    className="w-4 h-4 rounded text-red-600 bg-neutral-950 border-neutral-700 focus:ring-0 focus:outline-none cursor-pointer accent-red-600 shrink-0"
+                                  />
+                                  <div className="min-w-0">
+                                    <span className="font-semibold text-white block truncate">
+                                      {st.name}
+                                    </span>
+                                    <span className="text-[10px] text-neutral-400 font-mono">
+                                      Year {st.yearLevel} {st.tutorGroup ? `· ${st.tutorGroup}` : ''}
+                                    </span>
+                                  </div>
+                                </div>
+                                <span
+                                  className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-bold shrink-0 ${
+                                    isChecked
+                                      ? 'bg-red-900/80 text-white'
+                                      : 'bg-neutral-950 text-neutral-400 border border-neutral-800'
+                                  }`}
+                                >
+                                  {st.tutorGroup || `Y${st.yearLevel}`}
+                                </span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Selection Summary / House Award Note */}
+                    <div className="pt-2 border-t border-neutral-800/80">
+                      {selectedStudents.length > 0 ? (
+                        <div>
+                          <div className="flex items-center justify-between mb-1.5">
+                            <span className="text-[11px] font-bold text-emerald-400 flex items-center gap-1">
+                              <UserCheck className="w-3.5 h-3.5" />
+                              {selectedStudents.length} {selectedStudents.length === 1 ? 'Student' : 'Students'} Selected to Award:
+                            </span>
+                            <button
+                              type="button"
+                              onClick={handleClearStudentSelection}
+                              className="text-[10px] text-neutral-400 hover:text-neutral-200 underline"
+                            >
+                              Deselect All
+                            </button>
+                          </div>
+                          <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto">
+                            {selectedStudents.map((st) => (
+                              <span
+                                key={st.id}
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-neutral-900 border border-neutral-700 text-[11px] text-white font-medium"
+                              >
+                                <span>{st.name}</span>
+                                <span className="text-[9px] text-neutral-400 font-mono">({st.tutorGroup || `Y${st.yearLevel}`})</span>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleStudentSelection(st.id)}
+                                  className="text-neutral-400 hover:text-red-400 ml-0.5 cursor-pointer"
+                                  title="Remove"
+                                >
+                                  <X className="w-3 h-3" />
+                                </button>
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-2 p-2 rounded-lg bg-neutral-900/50 border border-neutral-800 text-[11px] text-neutral-400">
+                          <CheckCircle className="w-3.5 h-3.5 text-neutral-500 shrink-0" />
+                          <span>
+                            <strong>Entire House / Team Award:</strong> No individual students are selected. Points will be credited to {rawHouses[selectedHouse]?.name} as a whole-house team award.
+                          </span>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
 
-                {/* 4. Event Title & Quick Chips */}
+                {/* 4. EVENT TITLE / ACHIEVEMENT REASON */}
                 <div>
                   <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400 mb-1.5">
-                    Event / Achievement Reason
+                    4. Event / Achievement Reason
                   </label>
                   <input
                     type="text"
                     value={eventTitle}
                     onChange={(e) => setEventTitle(e.target.value)}
                     required
-                    placeholder="e.g. Senior 4x100m Athletics Relay (1st Place)"
+                    placeholder="e.g. Senior 100m Athletics Relay (1st Place)"
                     className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-red-600"
                   />
                   <div className="mt-2 flex flex-wrap gap-1.5">
@@ -477,7 +1169,7 @@ export const TeacherPortalDashboard: React.FC = () => {
                         key={title}
                         type="button"
                         onClick={() => setEventTitle(title)}
-                        className="text-[10px] px-2 py-0.5 rounded bg-neutral-950 text-neutral-400 hover:text-neutral-200 border border-neutral-800 hover:border-neutral-700 transition-colors"
+                        className="text-[10px] px-2 py-0.5 rounded bg-neutral-950 text-neutral-400 hover:text-neutral-200 border border-neutral-800 hover:border-neutral-700 transition-colors cursor-pointer"
                       >
                         + {title}
                       </button>
@@ -485,10 +1177,10 @@ export const TeacherPortalDashboard: React.FC = () => {
                   </div>
                 </div>
 
-                {/* 5. Notes */}
+                {/* 5. ADDITIONAL NOTES */}
                 <div>
                   <label className="block text-xs font-semibold text-neutral-400 mb-1">
-                    Additional Notes / Details (Optional)
+                    5. Additional Notes / Details (Optional)
                   </label>
                   <input
                     type="text"
@@ -515,6 +1207,9 @@ export const TeacherPortalDashboard: React.FC = () => {
                       <Plus className="w-4 h-4" />
                       <span>
                         Award +{pointsValue} Points to {rawHouses[selectedHouse]?.name}
+                        {selectedStudents.length > 0
+                          ? ` (${selectedStudents.length} student${selectedStudents.length === 1 ? '' : 's'})`
+                          : ''}
                       </span>
                     </>
                   )}
@@ -636,6 +1331,23 @@ export const TeacherPortalDashboard: React.FC = () => {
 
                           {ev.notes && (
                             <p className="text-xs text-neutral-400 mt-0.5 italic">{ev.notes}</p>
+                          )}
+
+                          {ev.studentRecipients && ev.studentRecipients.length > 0 && (
+                            <div className="flex flex-wrap items-center gap-1.5 mt-2">
+                              <span className="text-[10px] text-neutral-400 font-semibold flex items-center gap-1">
+                                <Users className="w-3 h-3 text-red-400" />
+                                Recipients ({ev.studentRecipients.length}):
+                              </span>
+                              {ev.studentRecipients.map((name, sIdx) => (
+                                <span
+                                  key={sIdx}
+                                  className="text-[10px] px-2 py-0.5 rounded bg-neutral-950 text-neutral-200 border border-neutral-700/80 font-medium"
+                                >
+                                  {name}
+                                </span>
+                              ))}
+                            </div>
                           )}
 
                           <div className="text-[11px] text-neutral-400 mt-1">
@@ -1393,67 +2105,270 @@ export const TeacherPortalDashboard: React.FC = () => {
           </div>
         )}
 
-        {/* TAB 5: COMPETITION CONTROLS */}
+        {/* TAB 5: HIDDEN ADMIN-ONLY COMPETITION CONTROLS & SCORE MATRIX */}
         {activeTab === 'settings' && (
-          <div className="max-w-2xl mx-auto space-y-6">
-            <div className="bg-neutral-900/80 border border-neutral-800 rounded-2xl p-6 sm:p-8">
-              <div className="mb-6 pb-4 border-b border-neutral-800">
-                <h2 className="text-xl font-bold text-white font-display">
-                  Competition Administration & Controls
-                </h2>
-                <p className="text-xs text-neutral-400 mt-0.5">
-                  Manage school competition datasets, terms, and fresh starts.
-                </p>
-              </div>
-
-              {/* Mobile App PWA Install Card */}
-              <div className="mb-6">
-                <PWAInstallButton variant="card" />
-              </div>
-
-              {settingsNotice && (
-                <div className="mb-5 p-3 rounded-xl bg-emerald-950/80 border border-emerald-800 text-emerald-200 text-xs flex items-center justify-between">
-                  <span>{settingsNotice}</span>
-                  <button
-                    onClick={() => setSettingsNotice(null)}
-                    className="text-emerald-400 hover:text-white text-xs ml-2 cursor-pointer"
-                  >
-                    Dismiss
-                  </button>
+          <div className="max-w-4xl mx-auto space-y-6">
+            {!isSuperAdmin ? (
+              <div className="bg-neutral-900/80 border border-neutral-800 rounded-2xl p-8 text-center space-y-4">
+                <div className="w-14 h-14 rounded-full bg-red-950/80 border border-red-800 flex items-center justify-center mx-auto text-red-400">
+                  <ShieldCheck className="w-7 h-7" />
                 </div>
-              )}
-
-              {!isSuperAdmin ? (
-                <div className="space-y-4">
-                  <div className="p-6 rounded-xl bg-neutral-950 border border-neutral-800 text-center space-y-3">
-                    <div className="w-12 h-12 rounded-full bg-neutral-900 border border-neutral-800 flex items-center justify-center mx-auto text-neutral-400">
-                      <ShieldCheck className="w-6 h-6 text-red-500" />
+                <h3 className="text-lg font-bold text-white">Administrator Restricted Area</h3>
+                <p className="text-xs text-neutral-400 max-w-md mx-auto leading-relaxed">
+                  Competition ordering, default allowed scores, and championship reset controls are restricted to the Super Administrator (<span className="text-neutral-200 font-mono">hermanf@gisboyshigh.net</span>).
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('award')}
+                  className="px-4 py-2 rounded-xl bg-red-700 hover:bg-red-600 text-white font-bold text-xs cursor-pointer transition-colors shadow-md"
+                >
+                  Return to Award Points Desk
+                </button>
+              </div>
+            ) : (
+              <>
+                {/* Main Competitions Header Card */}
+                <div className="bg-neutral-900/90 border border-neutral-800 rounded-2xl p-6 sm:p-8 shadow-xl">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-4 border-b border-neutral-800 gap-4">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <Trophy className="w-5 h-5 text-amber-400" />
+                        <h2 className="text-xl font-bold text-white font-display">
+                          Competition Administration & Defaults Matrix
+                        </h2>
+                      </div>
+                      <p className="text-xs text-neutral-400 mt-1 max-w-2xl leading-relaxed">
+                        Control the competitions teachers see on their scoring desk. Change allowed score defaults per event, add new competitions, and reorder events so your <strong>current active competition is at the top</strong>.
+                      </p>
                     </div>
-                    <h3 className="text-base font-bold text-white">Administrator Restricted Area</h3>
-                    <p className="text-xs text-neutral-400 max-w-md mx-auto leading-relaxed">
-                      Competition resets and scoring wipe controls are restricted to the Super Administrator (<span className="text-neutral-200 font-mono">hermanf@gisboyshigh.net</span>).
+
+                    <button
+                      type="button"
+                      onClick={openAddCompModal}
+                      className="px-4 py-2.5 rounded-xl bg-red-700 hover:bg-red-600 text-white font-bold text-xs flex items-center gap-2 shrink-0 shadow-lg shadow-red-950/50 cursor-pointer transition-all self-start sm:self-auto"
+                    >
+                      <Plus className="w-4 h-4" />
+                      <span>Add New Competition</span>
+                    </button>
+                  </div>
+
+                  {settingsNotice && (
+                    <div className="mt-4 p-3.5 rounded-xl bg-emerald-950/80 border border-emerald-700 text-emerald-200 text-xs flex items-center justify-between animate-fadeIn">
+                      <div className="flex items-center gap-2">
+                        <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+                        <span>{settingsNotice}</span>
+                      </div>
+                      <button
+                        onClick={() => setSettingsNotice(null)}
+                        className="text-emerald-400 hover:text-white text-xs ml-2 cursor-pointer"
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Current Active Competition Callout (#1 Position) */}
+                  {competitions.length > 0 && (
+                    <div className="mt-6 p-4 rounded-xl bg-neutral-950 border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-inner">
+                      <div className="flex items-start gap-3">
+                        <div className="p-2 rounded-lg bg-amber-950/70 border border-amber-600/50 text-amber-400 shrink-0 mt-0.5">
+                          <Star className="w-5 h-5 fill-amber-400" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-[10px] uppercase font-bold tracking-wider text-amber-400 font-mono">
+                              Current Primary Competition (Top of Teacher Desk)
+                            </span>
+                            <span className="px-2 py-0.2 rounded text-[10px] font-bold bg-neutral-900 text-neutral-300 border border-neutral-800">
+                              {competitions[0].category}
+                            </span>
+                          </div>
+                          <h4 className="text-base font-bold text-white mt-0.5 font-display">
+                            {competitions[0].name}
+                          </h4>
+                          <p className="text-xs text-neutral-400 mt-0.5">
+                            This competition is selected by default when teachers open their scoring portal.
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 flex-wrap sm:justify-end shrink-0">
+                        {competitions[0].allowedScores.map((score, sIdx) => (
+                          <span
+                            key={sIdx}
+                            className="px-2 py-1 rounded bg-neutral-900 border border-neutral-800 text-[11px] font-mono font-bold text-amber-300"
+                          >
+                            +{score.points}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Competitions Order & Score Defaults List */}
+                  <div className="mt-6 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-xs font-bold uppercase tracking-wider text-neutral-400">
+                        All Competitions ({competitions.length}) · Ordered by Display Priority
+                      </h3>
+                      <span className="text-[11px] text-neutral-500">
+                        Use arrows or &quot;Set as Current&quot; to change ordering
+                      </span>
+                    </div>
+
+                    <div className="space-y-3">
+                      {competitions.map((comp, index) => {
+                        const isTop = index === 0;
+                        return (
+                          <div
+                            key={comp.id}
+                            className={`p-4 rounded-xl border transition-all ${
+                              isTop
+                                ? 'bg-neutral-950/90 border-amber-500/40 ring-1 ring-amber-500/20'
+                                : 'bg-neutral-950/60 border-neutral-800 hover:border-neutral-700'
+                            }`}
+                          >
+                            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
+                              {/* Left Info */}
+                              <div className="space-y-1.5 flex-1 min-w-0">
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  {isTop ? (
+                                    <span className="px-2 py-0.5 rounded-md bg-amber-950 text-amber-300 border border-amber-700 font-bold text-[10px] flex items-center gap-1 font-mono">
+                                      <Star className="w-3 h-3 fill-amber-400 text-amber-400" />
+                                      #1 CURRENT TOP
+                                    </span>
+                                  ) : (
+                                    <span className="px-2 py-0.5 rounded-md bg-neutral-900 text-neutral-400 border border-neutral-800 font-mono text-[10px] font-bold">
+                                      #{index + 1}
+                                    </span>
+                                  )}
+
+                                  <h4 className="font-bold text-sm text-white truncate font-display">
+                                    {comp.name}
+                                  </h4>
+
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-neutral-900 text-neutral-300 border border-neutral-800">
+                                    {comp.category}
+                                  </span>
+
+                                  <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-neutral-900 text-neutral-400 border border-neutral-800">
+                                    {comp.term}
+                                  </span>
+
+                                  {!comp.isActive && (
+                                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-neutral-900 text-neutral-500 border border-neutral-800">
+                                      Archived
+                                    </span>
+                                  )}
+                                </div>
+
+                                {comp.description && (
+                                  <p className="text-xs text-neutral-400 leading-relaxed">
+                                    {comp.description}
+                                  </p>
+                                )}
+
+                                {/* Allowed Score Defaults Chips */}
+                                <div className="pt-1 flex flex-wrap items-center gap-1.5">
+                                  <span className="text-[10px] text-neutral-500 font-semibold uppercase tracking-wider mr-1">
+                                    Allowed Points:
+                                  </span>
+                                  {comp.allowedScores.map((score, sIdx) => (
+                                    <span
+                                      key={sIdx}
+                                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-neutral-900 border border-neutral-800 text-[11px]"
+                                    >
+                                      <span className="font-mono font-bold text-red-400">
+                                        +{score.points}
+                                      </span>
+                                      {score.label && (
+                                        <span className="text-neutral-400 text-[10px]">
+                                          ({score.label})
+                                        </span>
+                                      )}
+                                    </span>
+                                  ))}
+                                </div>
+                              </div>
+
+                              {/* Right Action Buttons */}
+                              <div className="flex items-center gap-1.5 self-start md:self-auto shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-neutral-800 w-full md:w-auto justify-end">
+                                {/* Set as Current (Move to #1) */}
+                                {!isTop && (
+                                  <button
+                                    type="button"
+                                    onClick={() => setCompetitionAsCurrent(comp.id)}
+                                    title="Pin this competition as Current Primary (#1 for teachers)"
+                                    className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-amber-950/70 hover:bg-amber-900 border border-amber-700/60 text-amber-300 text-xs font-bold cursor-pointer transition-colors shadow-sm"
+                                  >
+                                    <Star className="w-3.5 h-3.5 text-amber-400" />
+                                    <span>Set as Current</span>
+                                  </button>
+                                )}
+
+                                {/* Move Up */}
+                                <button
+                                  type="button"
+                                  disabled={index === 0}
+                                  onClick={() => moveCompetition(comp.id, 'up')}
+                                  title="Move Up in order"
+                                  className="p-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-neutral-300 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                                >
+                                  <ArrowUp className="w-3.5 h-3.5" />
+                                </button>
+
+                                {/* Move Down */}
+                                <button
+                                  type="button"
+                                  disabled={index === competitions.length - 1}
+                                  onClick={() => moveCompetition(comp.id, 'down')}
+                                  title="Move Down in order"
+                                  className="p-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-neutral-300 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer transition-colors"
+                                >
+                                  <ArrowDown className="w-3.5 h-3.5" />
+                                </button>
+
+                                {/* Edit Competition & Allowed Scores */}
+                                <button
+                                  type="button"
+                                  onClick={() => openEditCompModal(comp)}
+                                  title="Edit allowed default scores & competition info"
+                                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-blue-300 text-xs font-semibold cursor-pointer transition-colors"
+                                >
+                                  <Pencil className="w-3.5 h-3.5 text-blue-400" />
+                                  <span className="hidden sm:inline">Edit Defaults</span>
+                                </button>
+
+                                {/* Delete Competition */}
+                                <button
+                                  type="button"
+                                  onClick={() => setCompToDelete(comp)}
+                                  title="Delete Competition"
+                                  className="p-1.5 rounded-lg bg-neutral-900 hover:bg-red-950/80 border border-neutral-800 hover:border-red-800 text-red-400 cursor-pointer transition-colors"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Championship Resets & Archive Tools */}
+                <div className="bg-neutral-900/80 border border-neutral-800 rounded-2xl p-6 sm:p-8 space-y-4">
+                  <div className="pb-3 border-b border-neutral-800">
+                    <h3 className="text-base font-bold text-white font-display flex items-center gap-2">
+                      <RotateCcw className="w-4 h-4 text-red-400" />
+                      <span>Championship Scoring Resets & Data Archive</span>
+                    </h3>
+                    <p className="text-xs text-neutral-400 mt-0.5">
+                      Reset scores for a fresh start or export ledger spreadsheets.
                     </p>
                   </div>
 
-                  {/* Export Official Ledger (CSV) for staff record */}
-                  <div className="p-4 rounded-xl bg-neutral-950 border border-neutral-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-                    <div>
-                      <h4 className="font-bold text-sm text-white">Export Official Ledger (CSV)</h4>
-                      <p className="text-xs text-neutral-400 mt-0.5">
-                        Download spreadsheet archive with full timestamps, teachers, and notes.
-                      </p>
-                    </div>
-                    <button
-                      onClick={exportLedgerCSV}
-                      className="px-3.5 py-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-xs font-semibold text-neutral-200 transition-colors flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
-                    >
-                      <Download className="w-3.5 h-3.5 text-neutral-400" />
-                      <span>Export CSV Archive</span>
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-4">
                   {/* Reset All Scores to 0 */}
                   <div className="p-4 rounded-xl bg-red-950/20 border border-red-900/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                     <div>
@@ -1466,6 +2381,7 @@ export const TeacherPortalDashboard: React.FC = () => {
                       </p>
                     </div>
                     <button
+                      type="button"
                       onClick={() => setShowResetAllConfirm(true)}
                       className="px-4 py-2.5 rounded-lg bg-red-700 hover:bg-red-600 border border-red-600 text-xs font-bold text-white transition-all flex items-center justify-center gap-1.5 shrink-0 shadow-lg cursor-pointer"
                     >
@@ -1496,6 +2412,7 @@ export const TeacherPortalDashboard: React.FC = () => {
                         <option value="Term 4">Term 4</option>
                       </select>
                       <button
+                        type="button"
                         onClick={() => setShowClearTermConfirm(true)}
                         className="px-3.5 py-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 hover:border-neutral-600 text-xs font-semibold text-neutral-200 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
                       >
@@ -1514,6 +2431,7 @@ export const TeacherPortalDashboard: React.FC = () => {
                       </p>
                     </div>
                     <button
+                      type="button"
                       onClick={exportLedgerCSV}
                       className="px-3.5 py-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-xs font-semibold text-neutral-200 transition-colors flex items-center justify-center gap-1.5 shrink-0 cursor-pointer"
                     >
@@ -1522,8 +2440,8 @@ export const TeacherPortalDashboard: React.FC = () => {
                     </button>
                   </div>
                 </div>
-              )}
-            </div>
+              </>
+            )}
           </div>
         )}
       </main>
@@ -1721,6 +2639,703 @@ export const TeacherPortalDashboard: React.FC = () => {
                     <span>Confirm Reset {termToReset}</span>
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal for Adding New Competition */}
+      {showAddCompModal && isSuperAdmin && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
+              <div className="flex items-center gap-2">
+                <Trophy className="w-5 h-5 text-amber-400" />
+                <h3 className="font-bold text-base text-white">Add New Competition</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddCompModal(false)}
+                className="text-neutral-400 hover:text-white p-1 rounded-lg bg-neutral-800 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {compFormError && (
+              <div className="p-3 rounded-xl bg-red-950/80 border border-red-700 text-red-200 text-xs">
+                {compFormError}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveNewCompetition} className="space-y-4 text-xs">
+              <div>
+                <label className="block text-neutral-300 font-bold mb-1">
+                  Competition Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={compName}
+                  onChange={(e) => setCompName(e.target.value)}
+                  placeholder="e.g. Senior Swimming Sports or House Haka"
+                  className="w-full px-3 py-2 bg-neutral-950 border border-neutral-700 focus:border-red-500 rounded-lg text-white font-medium"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-neutral-300 font-bold mb-1">Category *</label>
+                  <select
+                    value={compCategory}
+                    onChange={(e) => setCompCategory(e.target.value as PointCategory)}
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-700 focus:border-red-500 rounded-lg text-white cursor-pointer"
+                  >
+                    <option value="Sports & Athletics">Sports & Athletics</option>
+                    <option value="Academic & STEM">Academic & STEM</option>
+                    <option value="Kaupapa Māori & Haka">Kaupapa Māori & Haka</option>
+                    <option value="Arts & Cultural">Arts & Cultural</option>
+                    <option value="Attendance & Merits">Attendance & Merits</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-neutral-300 font-bold mb-1">Default School Term</label>
+                  <select
+                    value={compTerm}
+                    onChange={(e) => setCompTerm(e.target.value as SchoolTerm)}
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-700 focus:border-red-500 rounded-lg text-white cursor-pointer"
+                  >
+                    <option value="Term 1">Term 1</option>
+                    <option value="Term 2">Term 2</option>
+                    <option value="Term 3">Term 3</option>
+                    <option value="Term 4">Term 4</option>
+                    <option value="All Year">All Year</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-neutral-300 font-bold mb-1">
+                  Description / Event Rules (Optional)
+                </label>
+                <textarea
+                  rows={2}
+                  value={compDescription}
+                  onChange={(e) => setCompDescription(e.target.value)}
+                  placeholder="e.g. Track finals and field events; relays awarded double"
+                  className="w-full px-3 py-2 bg-neutral-950 border border-neutral-700 focus:border-red-500 rounded-lg text-white"
+                />
+              </div>
+
+              {/* Allowed Default Scores Matrix Builder */}
+              <div className="p-3.5 rounded-xl bg-neutral-950 border border-neutral-800 space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <label className="block text-neutral-200 font-bold">
+                      Allowed Points Defaults *
+                    </label>
+                    <span className="text-[11px] text-neutral-400">
+                      These are the only points options teachers can award for this event.
+                    </span>
+                  </div>
+                </div>
+
+                {/* Score Preset Templates */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold mr-1">
+                    Presets:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => applyScorePreset('placings')}
+                    className="px-2 py-0.5 rounded bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-300 text-[10px] font-semibold cursor-pointer"
+                  >
+                    1st–4th (100, 75, 50, 25, 10)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyScorePreset('trophy')}
+                    className="px-2 py-0.5 rounded bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-300 text-[10px] font-semibold cursor-pointer"
+                  >
+                    Major Trophy (150, 100, 75, 50)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyScorePreset('academic')}
+                    className="px-2 py-0.5 rounded bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-300 text-[10px] font-semibold cursor-pointer"
+                  >
+                    Academic (80, 60, 40, 20)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyScorePreset('merits')}
+                    className="px-2 py-0.5 rounded bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-300 text-[10px] font-semibold cursor-pointer"
+                  >
+                    Merits (50, 30, 15, 5)
+                  </button>
+                </div>
+
+                {/* Existing Scores List */}
+                <div className="space-y-1.5 pt-2">
+                  {compAllowedScores.map((score, sIdx) => (
+                    <div
+                      key={sIdx}
+                      className="flex items-center justify-between p-2 rounded-lg bg-neutral-900 border border-neutral-800"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 rounded bg-red-950 text-red-300 border border-red-800/60 font-mono font-bold text-xs">
+                          +{score.points} pts
+                        </span>
+                        <span className="text-white text-xs font-medium">
+                          {score.label || 'Default Tier'}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveScoreTier(sIdx)}
+                        className="text-neutral-500 hover:text-red-400 p-1 rounded cursor-pointer"
+                        title="Remove score tier"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Add Custom Score Tier */}
+                <div className="pt-2 border-t border-neutral-800 flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="1"
+                    max="1000"
+                    placeholder="Points (e.g. 50)"
+                    value={newScorePoints}
+                    onChange={(e) => setNewScorePoints(e.target.value)}
+                    className="w-28 px-2.5 py-1.5 bg-neutral-900 border border-neutral-700 rounded-lg text-white font-mono text-xs"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Label (e.g. 1st Place)"
+                    value={newScoreLabel}
+                    onChange={(e) => setNewScoreLabel(e.target.value)}
+                    className="flex-1 px-2.5 py-1.5 bg-neutral-900 border border-neutral-700 rounded-lg text-white text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddScoreTier}
+                    className="px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-white font-semibold text-xs shrink-0 cursor-pointer"
+                  >
+                    + Add
+                  </button>
+                </div>
+              </div>
+
+              {/* Student Recipient Roster Policy */}
+              <div className="p-3.5 rounded-xl bg-neutral-950 border border-neutral-800 space-y-2.5">
+                <div>
+                  <label className="block text-neutral-200 font-bold">
+                    Student Recipient Roster Policy
+                  </label>
+                  <span className="text-[11px] text-neutral-400">
+                    Specify whether teachers award points across the whole school population or a custom competition squad.
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  <label
+                    className={`flex items-center gap-2 p-2.5 rounded-lg border cursor-pointer ${
+                      compRecipientMode === 'whole_school'
+                        ? 'bg-neutral-900 border-red-600 text-white font-bold'
+                        : 'bg-neutral-900/60 border-neutral-800 text-neutral-400 hover:text-white'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="addCompRecipientMode"
+                      value="whole_school"
+                      checked={compRecipientMode === 'whole_school'}
+                      onChange={() => setCompRecipientMode('whole_school')}
+                      className="accent-red-600"
+                    />
+                    <div className="min-w-0">
+                      <span className="block text-xs">Whole Student Population</span>
+                      <span className="text-[10px] text-neutral-400 font-normal">All GBHS students eligible</span>
+                    </div>
+                  </label>
+
+                  <label
+                    className={`flex items-center gap-2 p-2.5 rounded-lg border cursor-pointer ${
+                      compRecipientMode === 'custom_roster'
+                        ? 'bg-neutral-900 border-red-600 text-white font-bold'
+                        : 'bg-neutral-900/60 border-neutral-800 text-neutral-400 hover:text-white'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="addCompRecipientMode"
+                      value="custom_roster"
+                      checked={compRecipientMode === 'custom_roster'}
+                      onChange={() => setCompRecipientMode('custom_roster')}
+                      className="accent-red-600"
+                    />
+                    <div className="min-w-0">
+                      <span className="block text-xs">Custom Competition Squad</span>
+                      <span className="text-[10px] text-neutral-400 font-normal">Registered finalists / roster ({compCustomStudentIds.length})</span>
+                    </div>
+                  </label>
+                </div>
+
+                {compRecipientMode === 'custom_roster' && (
+                  <div className="pt-2 border-t border-neutral-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] text-neutral-300 font-semibold">
+                        Select Registered Squad / Finalists ({compCustomStudentIds.length} selected):
+                      </span>
+                      {compCustomStudentIds.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setCompCustomStudentIds([])}
+                          className="text-[10px] text-red-400 hover:text-red-300 underline"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      value={compStudentSearch}
+                      onChange={(e) => setCompStudentSearch(e.target.value)}
+                      placeholder="Filter students by name or tutor..."
+                      className="w-full px-2.5 py-1.5 bg-neutral-900 border border-neutral-700 rounded-lg text-white text-xs"
+                    />
+                    <div className="grid grid-cols-2 gap-1.5 max-h-36 overflow-y-auto p-1 bg-neutral-900/40 rounded-lg border border-neutral-800">
+                      {(students || [])
+                        .filter((s) => {
+                          if (!compStudentSearch.trim()) return true;
+                          const q = compStudentSearch.toLowerCase();
+                          return s.name.toLowerCase().includes(q) || (s.tutorGroup && s.tutorGroup.toLowerCase().includes(q));
+                        })
+                        .map((s) => {
+                          const isSelected = compCustomStudentIds.includes(s.id);
+                          return (
+                            <label
+                              key={s.id}
+                              className={`flex items-center gap-2 p-1.5 rounded border text-[11px] cursor-pointer ${
+                                isSelected
+                                  ? 'bg-red-950/60 border-red-600 text-white font-semibold'
+                                  : 'bg-neutral-900 border-neutral-800 text-neutral-300 hover:bg-neutral-800'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => handleToggleCompCustomStudent(s.id)}
+                                className="accent-red-600 shrink-0"
+                              />
+                              <span className="truncate flex-1">{s.name}</span>
+                              <span className="text-[9px] text-neutral-400 font-mono shrink-0">
+                                {s.tutorGroup || `Y${s.yearLevel}`}
+                              </span>
+                            </label>
+                          );
+                        })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddCompModal(false)}
+                  className="px-4 py-2 rounded-lg bg-neutral-800 text-neutral-300 hover:text-white cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingComp}
+                  className="px-4 py-2 rounded-lg bg-red-700 hover:bg-red-600 disabled:opacity-50 text-white font-bold cursor-pointer shadow-md"
+                >
+                  {isSavingComp ? 'Saving...' : 'Create Competition'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal for Editing Competition & Allowed Default Scores */}
+      {editingComp && isSuperAdmin && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4 overflow-y-auto">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl space-y-4 my-8 max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
+              <div className="flex items-center gap-2">
+                <Pencil className="w-4 h-4 text-blue-400" />
+                <h3 className="font-bold text-base text-white">Edit Competition & Defaults</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setEditingComp(null)}
+                className="text-neutral-400 hover:text-white p-1 rounded-lg bg-neutral-800 cursor-pointer"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {compFormError && (
+              <div className="p-3 rounded-xl bg-red-950/80 border border-red-700 text-red-200 text-xs">
+                {compFormError}
+              </div>
+            )}
+
+            <form onSubmit={handleSaveEditedCompetition} className="space-y-4 text-xs">
+              <div>
+                <label className="block text-neutral-300 font-bold mb-1">
+                  Competition Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={compName}
+                  onChange={(e) => setCompName(e.target.value)}
+                  className="w-full px-3 py-2 bg-neutral-950 border border-neutral-700 focus:border-red-500 rounded-lg text-white font-medium"
+                />
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-neutral-300 font-bold mb-1">Category *</label>
+                  <select
+                    value={compCategory}
+                    onChange={(e) => setCompCategory(e.target.value as PointCategory)}
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-700 focus:border-red-500 rounded-lg text-white cursor-pointer"
+                  >
+                    <option value="Sports & Athletics">Sports & Athletics</option>
+                    <option value="Academic & STEM">Academic & STEM</option>
+                    <option value="Kaupapa Māori & Haka">Kaupapa Māori & Haka</option>
+                    <option value="Arts & Cultural">Arts & Cultural</option>
+                    <option value="Attendance & Merits">Attendance & Merits</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-neutral-300 font-bold mb-1">Default School Term</label>
+                  <select
+                    value={compTerm}
+                    onChange={(e) => setCompTerm(e.target.value as SchoolTerm)}
+                    className="w-full px-3 py-2 bg-neutral-950 border border-neutral-700 focus:border-red-500 rounded-lg text-white cursor-pointer"
+                  >
+                    <option value="Term 1">Term 1</option>
+                    <option value="Term 2">Term 2</option>
+                    <option value="Term 3">Term 3</option>
+                    <option value="Term 4">Term 4</option>
+                    <option value="All Year">All Year</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-neutral-300 font-bold mb-1">
+                  Description / Event Rules
+                </label>
+                <textarea
+                  rows={2}
+                  value={compDescription}
+                  onChange={(e) => setCompDescription(e.target.value)}
+                  className="w-full px-3 py-2 bg-neutral-950 border border-neutral-700 focus:border-red-500 rounded-lg text-white"
+                />
+              </div>
+
+              {/* Allowed Default Scores Matrix Builder */}
+              <div className="p-3.5 rounded-xl bg-neutral-950 border border-neutral-800 space-y-3">
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    <label className="block text-neutral-200 font-bold">
+                      Allowed Points Defaults *
+                    </label>
+                    <span className="text-[11px] text-neutral-400">
+                      These are the exact score buttons teachers can choose on their desk.
+                    </span>
+                  </div>
+                </div>
+
+                {/* Score Preset Templates */}
+                <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                  <span className="text-[10px] text-neutral-500 uppercase tracking-wider font-semibold mr-1">
+                    Presets:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => applyScorePreset('placings')}
+                    className="px-2 py-0.5 rounded bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-300 text-[10px] font-semibold cursor-pointer"
+                  >
+                    1st–4th (100, 75, 50, 25, 10)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyScorePreset('trophy')}
+                    className="px-2 py-0.5 rounded bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-300 text-[10px] font-semibold cursor-pointer"
+                  >
+                    Major Trophy (150, 100, 75, 50)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyScorePreset('academic')}
+                    className="px-2 py-0.5 rounded bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-300 text-[10px] font-semibold cursor-pointer"
+                  >
+                    Academic (80, 60, 40, 20)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => applyScorePreset('merits')}
+                    className="px-2 py-0.5 rounded bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-300 text-[10px] font-semibold cursor-pointer"
+                  >
+                    Merits (50, 30, 15, 5)
+                  </button>
+                </div>
+
+                {/* Existing Scores List */}
+                <div className="space-y-1.5 pt-2">
+                  {compAllowedScores.map((score, sIdx) => (
+                    <div
+                      key={sIdx}
+                      className="flex items-center justify-between p-2 rounded-lg bg-neutral-900 border border-neutral-800"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span className="px-2 py-0.5 rounded bg-red-950 text-red-300 border border-red-800/60 font-mono font-bold text-xs">
+                          +{score.points} pts
+                        </span>
+                        <span className="text-white text-xs font-medium">
+                          {score.label || 'Default Tier'}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveScoreTier(sIdx)}
+                        className="text-neutral-500 hover:text-red-400 p-1 rounded cursor-pointer"
+                        title="Remove score tier"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Add Custom Score Tier */}
+                <div className="pt-2 border-t border-neutral-800 flex items-center gap-2">
+                  <input
+                    type="number"
+                    min="1"
+                    max="1000"
+                    placeholder="Points (e.g. 50)"
+                    value={newScorePoints}
+                    onChange={(e) => setNewScorePoints(e.target.value)}
+                    className="w-28 px-2.5 py-1.5 bg-neutral-900 border border-neutral-700 rounded-lg text-white font-mono text-xs"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Label (e.g. 1st Place)"
+                    value={newScoreLabel}
+                    onChange={(e) => setNewScoreLabel(e.target.value)}
+                    className="flex-1 px-2.5 py-1.5 bg-neutral-900 border border-neutral-700 rounded-lg text-white text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddScoreTier}
+                    className="px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-white font-semibold text-xs shrink-0 cursor-pointer"
+                  >
+                    + Add
+                  </button>
+                </div>
+              </div>
+
+              {/* Student Recipient Roster Policy */}
+              <div className="p-3.5 rounded-xl bg-neutral-950 border border-neutral-800 space-y-2.5">
+                <div>
+                  <label className="block text-neutral-200 font-bold">
+                    Student Recipient Roster Policy
+                  </label>
+                  <span className="text-[11px] text-neutral-400">
+                    Specify whether teachers award points across the whole school population or a custom competition squad.
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  <label
+                    className={`flex items-center gap-2 p-2.5 rounded-lg border cursor-pointer ${
+                      compRecipientMode === 'whole_school'
+                        ? 'bg-neutral-900 border-red-600 text-white font-bold'
+                        : 'bg-neutral-900/60 border-neutral-800 text-neutral-400 hover:text-white'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="editCompRecipientMode"
+                      value="whole_school"
+                      checked={compRecipientMode === 'whole_school'}
+                      onChange={() => setCompRecipientMode('whole_school')}
+                      className="accent-red-600"
+                    />
+                    <div className="min-w-0">
+                      <span className="block text-xs">Whole Student Population</span>
+                      <span className="text-[10px] text-neutral-400 font-normal">All GBHS students eligible</span>
+                    </div>
+                  </label>
+
+                  <label
+                    className={`flex items-center gap-2 p-2.5 rounded-lg border cursor-pointer ${
+                      compRecipientMode === 'custom_roster'
+                        ? 'bg-neutral-900 border-red-600 text-white font-bold'
+                        : 'bg-neutral-900/60 border-neutral-800 text-neutral-400 hover:text-white'
+                    }`}
+                  >
+                    <input
+                      type="radio"
+                      name="editCompRecipientMode"
+                      value="custom_roster"
+                      checked={compRecipientMode === 'custom_roster'}
+                      onChange={() => setCompRecipientMode('custom_roster')}
+                      className="accent-red-600"
+                    />
+                    <div className="min-w-0">
+                      <span className="block text-xs">Custom Competition Squad</span>
+                      <span className="text-[10px] text-neutral-400 font-normal">Registered finalists / roster ({compCustomStudentIds.length})</span>
+                    </div>
+                  </label>
+                </div>
+
+                {compRecipientMode === 'custom_roster' && (
+                  <div className="pt-2 border-t border-neutral-800 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] text-neutral-300 font-semibold">
+                        Select Registered Squad / Finalists ({compCustomStudentIds.length} selected):
+                      </span>
+                      {compCustomStudentIds.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setCompCustomStudentIds([])}
+                          className="text-[10px] text-red-400 hover:text-red-300 underline"
+                        >
+                          Clear
+                        </button>
+                      )}
+                    </div>
+                    <input
+                      type="text"
+                      value={compStudentSearch}
+                      onChange={(e) => setCompStudentSearch(e.target.value)}
+                      placeholder="Filter students by name or tutor..."
+                      className="w-full px-2.5 py-1.5 bg-neutral-900 border border-neutral-700 rounded-lg text-white text-xs"
+                    />
+                    <div className="grid grid-cols-2 gap-1.5 max-h-36 overflow-y-auto p-1 bg-neutral-900/40 rounded-lg border border-neutral-800">
+                      {(students || [])
+                        .filter((s) => {
+                          if (!compStudentSearch.trim()) return true;
+                          const q = compStudentSearch.toLowerCase();
+                          return s.name.toLowerCase().includes(q) || (s.tutorGroup && s.tutorGroup.toLowerCase().includes(q));
+                        })
+                        .map((s) => {
+                          const isSelected = compCustomStudentIds.includes(s.id);
+                          return (
+                            <label
+                              key={s.id}
+                              className={`flex items-center gap-2 p-1.5 rounded border text-[11px] cursor-pointer ${
+                                isSelected
+                                  ? 'bg-red-950/60 border-red-600 text-white font-semibold'
+                                  : 'bg-neutral-900 border-neutral-800 text-neutral-300 hover:bg-neutral-800'
+                              }`}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={isSelected}
+                                onChange={() => handleToggleCompCustomStudent(s.id)}
+                                className="accent-red-600 shrink-0"
+                              />
+                              <span className="truncate flex-1">{s.name}</span>
+                              <span className="text-[9px] text-neutral-400 font-mono shrink-0">
+                                {s.tutorGroup || `Y${s.yearLevel}`}
+                              </span>
+                            </label>
+                          );
+                        })}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="pt-2 flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingComp(null)}
+                  className="px-4 py-2 rounded-lg bg-neutral-800 text-neutral-300 hover:text-white cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={isSavingComp}
+                  className="px-4 py-2 rounded-lg bg-red-700 hover:bg-red-600 disabled:opacity-50 text-white font-bold cursor-pointer shadow-md"
+                >
+                  {isSavingComp ? 'Saving Changes...' : 'Save Changes'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal for Confirming Competition Deletion */}
+      {compToDelete && isSuperAdmin && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
+              <div className="flex items-center gap-2 text-red-400">
+                <Trash2 className="w-4 h-4" />
+                <h3 className="font-bold text-base text-white">Delete Competition</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => !isDeletingComp && setCompToDelete(null)}
+                disabled={isDeletingComp}
+                className="text-neutral-400 hover:text-white text-xs p-1 rounded-lg bg-neutral-800 cursor-pointer disabled:opacity-50"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <p className="text-neutral-300 leading-relaxed">
+                Are you sure you want to delete the competition <strong className="text-white">&quot;{compToDelete.name}&quot;</strong>?
+              </p>
+              <div className="p-3 bg-neutral-950 rounded-xl border border-neutral-800 space-y-1">
+                <div className="text-neutral-400">Category: <span className="text-neutral-200">{compToDelete.category}</span></div>
+                <div className="text-neutral-400">Term: <span className="text-neutral-200">{compToDelete.term}</span></div>
+                <div className="text-neutral-400">Allowed Tiers: <span className="text-neutral-200">{compToDelete.allowedScores.map(s => `+${s.points}`).join(', ')}</span></div>
+              </div>
+              <p className="text-neutral-400 text-[11px]">
+                Teachers will no longer see this competition on their scoring desk. Previously awarded ledger points will remain intact.
+              </p>
+            </div>
+
+            <div className="pt-2 flex justify-end gap-2 text-xs">
+              <button
+                type="button"
+                disabled={isDeletingComp}
+                onClick={() => setCompToDelete(null)}
+                className="px-3.5 py-2 rounded-lg bg-neutral-800 text-neutral-300 hover:text-white cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isDeletingComp}
+                onClick={handleConfirmDeleteCompetition}
+                className="px-4 py-2 rounded-lg bg-red-700 hover:bg-red-600 text-white font-bold cursor-pointer transition-colors shadow-sm flex items-center gap-1.5 disabled:opacity-50"
+              >
+                {isDeletingComp ? 'Deleting...' : 'Confirm Delete'}
               </button>
             </div>
           </div>

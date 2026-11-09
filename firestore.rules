@@ -32,7 +32,7 @@ service cloud.firestore {
 
     function isValidPointEvent(data) {
       return data.keys().hasAll(['id', 'houseId', 'points', 'title', 'category', 'term', 'awardedBy', 'timestamp'])
-        && data.keys().hasOnly(['id', 'houseId', 'points', 'title', 'category', 'term', 'awardedBy', 'timestamp', 'notes', 'teacherEmail'])
+        && data.keys().hasOnly(['id', 'houseId', 'points', 'title', 'category', 'term', 'awardedBy', 'timestamp', 'notes', 'teacherEmail', 'competitionId', 'studentRecipients'])
         && data.id is string && data.id.size() > 0 && data.id.size() <= 128
         && isValidHouseId(data.houseId)
         && data.points is number && data.points >= -1000 && data.points <= 1000
@@ -41,6 +41,8 @@ service cloud.firestore {
         && isValidTerm(data.term)
         && data.awardedBy is string && data.awardedBy.size() > 0 && data.awardedBy.size() <= 150
         && data.timestamp is number
+        && (!('competitionId' in data) || (data.competitionId is string && data.competitionId.size() <= 128))
+        && (!('studentRecipients' in data) || (data.studentRecipients is list))
         && (!('teacherEmail' in data) || (data.teacherEmail is string && data.teacherEmail.size() <= 200))
         && (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000));
     }
@@ -81,6 +83,24 @@ service cloud.firestore {
       allow read: if true;
       allow create, update: if isValidTeacherId(teacherId) && isAdmin() && isValidAuthorizedTeacher(request.resource.data);
       allow delete: if isValidTeacherId(teacherId) && isAdmin();
+    }
+
+    // Competitions Collection:
+    // Holds school competitions with ordered display index, category, term, and allowed point score presets.
+    // Public read so teachers and leaderboard can read configured competitions.
+    // Create, update, delete permitted for signed-in staff and admin.
+    match /competitions/{competitionId} {
+      allow read: if true;
+      allow create, update, delete: if isSignedIn() || isAdmin();
+    }
+
+    // Students Collection:
+    // Holds the student directory across the 4 GBHS houses.
+    // Public read for name selector during points award.
+    // Create, update, delete permitted for signed-in staff and admin.
+    match /students/{studentId} {
+      allow read: if true;
+      allow create, update, delete: if isSignedIn() || isAdmin();
     }
   }
 }

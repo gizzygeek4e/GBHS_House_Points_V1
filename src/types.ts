@@ -27,6 +27,33 @@ export interface House {
   rank: number;
 }
 
+export interface AllowedScoreOption {
+  points: number;
+  label?: string; // e.g. "1st Place", "2nd Place", "3rd Place", "Participation"
+}
+
+export interface Student {
+  id: string;
+  name: string;
+  houseId: HouseId;
+  yearLevel: number;
+  tutorGroup?: string;
+}
+
+export interface Competition {
+  id: string;
+  name: string;
+  category: PointCategory;
+  term: SchoolTerm;
+  allowedScores: AllowedScoreOption[];
+  order: number; // 0 = current active competition displayed at top
+  isActive: boolean;
+  description?: string;
+  updatedAt?: number;
+  recipientMode?: 'whole_school' | 'custom_roster';
+  customStudentIds?: string[];
+}
+
 export interface PointEvent {
   id: string;
   houseId: HouseId;
@@ -38,6 +65,8 @@ export interface PointEvent {
   teacherEmail?: string;
   timestamp: number;
   notes?: string;
+  competitionId?: string;
+  studentRecipients?: string[];
 }
 
 export interface TeacherAccount {
@@ -57,3 +86,4 @@ export interface TeacherUser {
   isTeacher: boolean;
   isSuperAdmin?: boolean;
 }
+

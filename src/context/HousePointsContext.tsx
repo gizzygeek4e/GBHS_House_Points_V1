@@ -15,8 +15,8 @@ import {
 } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType, testFirestoreConnection } from '../services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { House, HouseId, PointEvent, TeacherUser, TeacherAccount, SchoolTerm, PointCategory } from '../types';
-import { INITIAL_HOUSES, INITIAL_POINT_EVENTS, INITIAL_AUTHORIZED_TEACHERS } from '../data/initialData';
+import { House, HouseId, PointEvent, TeacherUser, TeacherAccount, SchoolTerm, PointCategory, Competition, Student } from '../types';
+import { INITIAL_HOUSES, INITIAL_POINT_EVENTS, INITIAL_AUTHORIZED_TEACHERS, INITIAL_COMPETITIONS, INITIAL_STUDENTS } from '../data/initialData';
 import { soundManager } from '../utils/audio';
 import {
   signInWithGoogleAccount,
@@ -28,6 +28,8 @@ import {
 const STORAGE_EVENTS_KEY = 'gbhs_house_points_events_v4';
 const STORAGE_AUTH_KEY = 'gbhs_teacher_auth_v3';
 const STORAGE_SHEET_TEACHERS_KEY = 'gbhs_sheet_teachers_v3';
+const STORAGE_COMPETITIONS_KEY = 'gbhs_competitions_v1';
+const STORAGE_STUDENTS_KEY = 'gbhs_students_v1';
 
 export type AppView = 'assembly' | 'teacher-login' | 'teacher-portal';
 
@@ -40,6 +42,14 @@ interface HousePointsContextType {
   setSelectedTerm: (term: SchoolTerm) => void;
   selectedCategory: PointCategory | 'All Categories';
   setSelectedCategory: (cat: PointCategory | 'All Categories') => void;
+  students: Student[];
+  competitions: Competition[];
+  addCompetition: (comp: Omit<Competition, 'id' | 'updatedAt'>) => Promise<void>;
+  updateCompetition: (id: string, updated: Partial<Competition>) => Promise<void>;
+  deleteCompetition: (id: string) => Promise<void>;
+  reorderCompetitions: (reordered: Competition[]) => Promise<void>;
+  setCompetitionAsCurrent: (id: string) => Promise<void>;
+  moveCompetition: (id: string, direction: 'up' | 'down') => Promise<void>;
   teacherUser: TeacherUser | null;
   authorizedTeachers: TeacherAccount[];
   updateAuthorizedTeachers: (teachers: TeacherAccount[]) => Promise<void>;
@@ -98,6 +108,32 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     return INITIAL_AUTHORIZED_TEACHERS;
   });
 
+  // School Competitions and custom order (synced in real-time with Cloud Firestore)
+  const [competitions, setCompetitions] = useState<Competition[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_COMPETITIONS_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+        }
+      }
+    } catch {}
+    return INITIAL_COMPETITIONS;
+  });
+
+  // GBHS Student Database (Whole School Population synced with Cloud Firestore)
+  const [students, setStudents] = useState<Student[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_STUDENTS_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return INITIAL_STUDENTS;
+  });
+
   // Teacher user session (authenticated via Google)
   const [teacherUser, setTeacherUser] = useState<TeacherUser | null>(() => {
     try {
@@ -133,6 +169,18 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
       localStorage.setItem(STORAGE_SHEET_TEACHERS_KEY, JSON.stringify(authorizedTeachers));
     } catch {}
   }, [authorizedTeachers]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_COMPETITIONS_KEY, JSON.stringify(competitions));
+    } catch {}
+  }, [competitions]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_STUDENTS_KEY, JSON.stringify(students));
+    } catch {}
+  }, [students]);
 
   useEffect(() => {
     try {
@@ -257,9 +305,97 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
       }
     );
 
+    // Sync competitions in real time from Firestore
+    const competitionsRef = collection(db, 'competitions');
+    const compQuery = query(competitionsRef, orderBy('order', 'asc'));
+
+    const unsubscribeCompetitions = onSnapshot(
+      compQuery,
+      async (snapshot) => {
+        if (!snapshot.empty) {
+          const liveComps: Competition[] = [];
+          snapshot.forEach((d) => {
+            const data = d.data() as Competition;
+            liveComps.push({
+              ...data,
+              id: d.id,
+            });
+          });
+          liveComps.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+          setCompetitions(liveComps);
+        } else {
+          // Pre-seed default competitions to Firestore
+          try {
+            const batch = writeBatch(db);
+            INITIAL_COMPETITIONS.forEach((c, idx) => {
+              const compDoc = doc(db, 'competitions', c.id);
+              batch.set(compDoc, {
+                ...c,
+                order: idx,
+                updatedAt: Date.now(),
+              });
+            });
+            await batch.commit();
+          } catch (err) {
+            console.warn('Initial competitions seed note:', err);
+          }
+        }
+      },
+      (error) => {
+        const isUnavailable =
+          error.code === 'unavailable' ||
+          error.message?.includes('offline') ||
+          error.message?.includes('Could not reach Cloud Firestore');
+        if (!isUnavailable) {
+          console.warn('Real-time competitions sync warning:', error);
+        }
+      }
+    );
+
+    // Sync GBHS students database in real time from Firestore
+    const studentsRef = collection(db, 'students');
+    const unsubscribeStudents = onSnapshot(
+      studentsRef,
+      async (snapshot) => {
+        if (!snapshot.empty) {
+          const liveStudents: Student[] = [];
+          snapshot.forEach((d) => {
+            liveStudents.push({
+              ...(d.data() as Student),
+              id: d.id,
+            });
+          });
+          setStudents(liveStudents);
+        } else {
+          // Pre-seed initial student population into Firestore
+          try {
+            const batch = writeBatch(db);
+            INITIAL_STUDENTS.forEach((s) => {
+              const stuDoc = doc(db, 'students', s.id);
+              batch.set(stuDoc, s);
+            });
+            await batch.commit();
+          } catch (err) {
+            console.warn('Initial students seed note:', err);
+          }
+        }
+      },
+      (error) => {
+        const isUnavailable =
+          error.code === 'unavailable' ||
+          error.message?.includes('offline') ||
+          error.message?.includes('Could not reach Cloud Firestore');
+        if (!isUnavailable) {
+          console.warn('Real-time students sync warning:', error);
+        }
+      }
+    );
+
     return () => {
       unsubscribeEvents();
       unsubscribeTeachers();
+      unsubscribeCompetitions();
+      unsubscribeStudents();
     };
   }, []);
 
@@ -491,6 +627,176 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   };
 
   /**
+   * COMPETITION MANAGEMENT (Admin Only):
+   * Add, update, delete, reorder, and set primary active competition.
+   * Real-time synchronized via Cloud Firestore so teachers instantly see updated orders and default points.
+   */
+  const addCompetition = async (comp: Omit<Competition, 'id' | 'updatedAt'>) => {
+    if (!checkIsAdmin()) {
+      throw new Error('Unauthorized: Only Admin can add competitions.');
+    }
+
+    const compId = `comp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const newOrder = comp.order !== undefined ? comp.order : competitions.length;
+    const newComp: Competition = {
+      ...comp,
+      id: compId,
+      order: newOrder,
+      updatedAt: Date.now(),
+    };
+
+    const updated = [...competitions, newComp].sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+    setCompetitions(updated);
+
+    try {
+      await setDoc(doc(db, 'competitions', compId), newComp);
+    } catch (err) {
+      console.error('Failed to add competition:', err);
+      handleFirestoreError(err, OperationType.WRITE, 'competitions');
+      throw err;
+    }
+  };
+
+  const updateCompetition = async (id: string, updated: Partial<Competition>) => {
+    if (!checkIsAdmin()) {
+      throw new Error('Unauthorized: Only Admin can edit competitions.');
+    }
+
+    const updatedList = competitions.map((c) =>
+      c.id === id ? { ...c, ...updated, updatedAt: Date.now() } : c
+    );
+    setCompetitions(updatedList);
+
+    try {
+      await updateDoc(doc(db, 'competitions', id), {
+        ...updated,
+        updatedAt: Date.now(),
+      });
+    } catch (err) {
+      console.error('Failed to update competition:', err);
+      handleFirestoreError(err, OperationType.WRITE, 'competitions');
+      throw err;
+    }
+  };
+
+  const deleteCompetition = async (id: string) => {
+    if (!checkIsAdmin()) {
+      throw new Error('Unauthorized: Only Admin can delete competitions.');
+    }
+
+    const filtered = competitions.filter((c) => c.id !== id);
+    setCompetitions(filtered);
+
+    try {
+      await deleteDoc(doc(db, 'competitions', id));
+    } catch (err) {
+      console.error('Failed to delete competition:', err);
+      handleFirestoreError(err, OperationType.DELETE, 'competitions');
+      throw err;
+    }
+  };
+
+  const setCompetitionAsCurrent = async (id: string) => {
+    if (!checkIsAdmin()) {
+      throw new Error('Unauthorized: Only Admin can reorder competitions.');
+    }
+
+    const target = competitions.find((c) => c.id === id);
+    if (!target) return;
+    const others = competitions.filter((c) => c.id !== id);
+    const reordered = [target, ...others].map((c, index) => ({
+      ...c,
+      order: index,
+      updatedAt: Date.now(),
+    }));
+
+    setCompetitions(reordered);
+
+    try {
+      const batch = writeBatch(db);
+      reordered.forEach((c) => {
+        batch.update(doc(db, 'competitions', c.id), {
+          order: c.order,
+          updatedAt: c.updatedAt,
+        });
+      });
+      await batch.commit();
+    } catch (err) {
+      console.error('Failed to set competition as current:', err);
+      handleFirestoreError(err, OperationType.WRITE, 'competitions');
+      throw err;
+    }
+  };
+
+  const moveCompetition = async (id: string, direction: 'up' | 'down') => {
+    if (!checkIsAdmin()) {
+      throw new Error('Unauthorized: Only Admin can reorder competitions.');
+    }
+
+    const index = competitions.findIndex((c) => c.id === id);
+    if (index === -1) return;
+    if (direction === 'up' && index === 0) return;
+    if (direction === 'down' && index === competitions.length - 1) return;
+
+    const swapIndex = direction === 'up' ? index - 1 : index + 1;
+    const newList = [...competitions];
+    const temp = newList[index];
+    newList[index] = newList[swapIndex];
+    newList[swapIndex] = temp;
+
+    const reordered = newList.map((c, idx) => ({
+      ...c,
+      order: idx,
+      updatedAt: Date.now(),
+    }));
+
+    setCompetitions(reordered);
+
+    try {
+      const batch = writeBatch(db);
+      reordered.forEach((c) => {
+        batch.update(doc(db, 'competitions', c.id), {
+          order: c.order,
+          updatedAt: c.updatedAt,
+        });
+      });
+      await batch.commit();
+    } catch (err) {
+      console.error('Failed to move competition:', err);
+      handleFirestoreError(err, OperationType.WRITE, 'competitions');
+      throw err;
+    }
+  };
+
+  const reorderCompetitions = async (reordered: Competition[]) => {
+    if (!checkIsAdmin()) {
+      throw new Error('Unauthorized: Only Admin can reorder competitions.');
+    }
+
+    const indexed = reordered.map((c, idx) => ({
+      ...c,
+      order: idx,
+      updatedAt: Date.now(),
+    }));
+    setCompetitions(indexed);
+
+    try {
+      const batch = writeBatch(db);
+      indexed.forEach((c) => {
+        batch.update(doc(db, 'competitions', c.id), {
+          order: c.order,
+          updatedAt: c.updatedAt,
+        });
+      });
+      await batch.commit();
+    } catch (err) {
+      console.error('Failed to reorder competitions:', err);
+      handleFirestoreError(err, OperationType.WRITE, 'competitions');
+      throw err;
+    }
+  };
+
+  /**
    * Primary Teacher Google Login Flow:
    * 1. Signs in via genuine Google OAuth popup using standard profile and email scopes.
    * 2. Checks user's verified Google account email against the Cloud Firestore authorizedTeachers database.
@@ -619,6 +925,14 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
     if (data.notes && data.notes.trim()) {
       cleanPayload.notes = data.notes.trim();
+    }
+
+    if (data.studentRecipients && data.studentRecipients.length > 0) {
+      cleanPayload.studentRecipients = data.studentRecipients;
+    }
+
+    if ((data as any).competitionId) {
+      cleanPayload.competitionId = (data as any).competitionId;
     }
 
     try {
@@ -760,7 +1074,7 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   };
 
   const exportLedgerCSV = () => {
-    const headers = ['ID', 'House', 'Points', 'Category', 'Term', 'Title', 'AwardedBy', 'Date', 'Notes'];
+    const headers = ['ID', 'House', 'Points', 'Category', 'Term', 'Title', 'StudentRecipients', 'AwardedBy', 'Date', 'Notes'];
     const rows = events.map((e) => [
       e.id,
       INITIAL_HOUSES[e.houseId]?.name || e.houseId,
@@ -768,6 +1082,7 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
       `"${e.category}"`,
       e.term,
       `"${e.title.replace(/"/g, '""')}"`,
+      `"${(e.studentRecipients || []).join('; ').replace(/"/g, '""')}"`,
       `"${e.awardedBy}"`,
       new Date(e.timestamp).toISOString(),
       `"${(e.notes || '').replace(/"/g, '""')}"`,
@@ -801,6 +1116,14 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
         setSelectedTerm,
         selectedCategory,
         setSelectedCategory,
+        competitions,
+        students,
+        addCompetition,
+        updateCompetition,
+        deleteCompetition,
+        reorderCompetitions,
+        setCompetitionAsCurrent,
+        moveCompetition,
         teacherUser,
         authorizedTeachers,
         updateAuthorizedTeachers,

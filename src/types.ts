@@ -38,6 +38,19 @@ export interface Student {
   houseId: HouseId;
   yearLevel: number;
   tutorGroup?: string;
+  updatedAt?: number;
+}
+
+export interface RecipientGroup {
+  id: string;
+  name: string;
+  type: 'team' | 'group';
+  houseId: HouseId;
+  competitionId?: string;
+  studentIds: string[];
+  description?: string;
+  createdBy?: string;
+  updatedAt?: number;
 }
 
 export interface Competition {
@@ -67,6 +80,8 @@ export interface PointEvent {
   notes?: string;
   competitionId?: string;
   studentRecipients?: string[];
+  groupId?: string;
+  groupName?: string;
 }
 
 export interface TeacherAccount {

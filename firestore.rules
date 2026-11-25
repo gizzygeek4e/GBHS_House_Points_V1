@@ -18,6 +18,7 @@ service cloud.firestore {
 
     function isAdmin() {
       return request.auth != null
+        && request.auth.token.email_verified == true
         && request.auth.token.email != null
         && request.auth.token.email.matches('(?i)^hermanf@gisboyshigh\\.net$');
     }
@@ -30,19 +31,25 @@ service cloud.firestore {
       return term in ['Term 1', 'Term 2', 'Term 3', 'Term 4'];
     }
 
+    function isValidCompetitionTerm(term) {
+      return term in ['Term 1', 'Term 2', 'Term 3', 'Term 4', 'All Year'];
+    }
+
     function isValidPointEvent(data) {
       return data.keys().hasAll(['id', 'houseId', 'points', 'title', 'category', 'term', 'awardedBy', 'timestamp'])
-        && data.keys().hasOnly(['id', 'houseId', 'points', 'title', 'category', 'term', 'awardedBy', 'timestamp', 'notes', 'teacherEmail', 'competitionId', 'studentRecipients'])
+        && data.keys().hasOnly(['id', 'houseId', 'points', 'title', 'category', 'term', 'awardedBy', 'timestamp', 'notes', 'teacherEmail', 'competitionId', 'studentRecipients', 'groupId', 'groupName'])
         && data.id is string && data.id.size() > 0 && data.id.size() <= 128
         && isValidHouseId(data.houseId)
-        && data.points is number && data.points >= -1000 && data.points <= 1000
+        && data.points is number && data.points >= -1000 && data.points <= 1000 && data.points != 0
         && data.title is string && data.title.size() > 0 && data.title.size() <= 300
         && data.category is string && data.category.size() > 0 && data.category.size() <= 100
         && isValidTerm(data.term)
         && data.awardedBy is string && data.awardedBy.size() > 0 && data.awardedBy.size() <= 150
         && data.timestamp is number
         && (!('competitionId' in data) || (data.competitionId is string && data.competitionId.size() <= 128))
-        && (!('studentRecipients' in data) || (data.studentRecipients is list))
+        && (!('studentRecipients' in data) || (data.studentRecipients is list && data.studentRecipients.size() <= 100))
+        && (!('groupId' in data) || (data.groupId is string && data.groupId.size() <= 128))
+        && (!('groupName' in data) || (data.groupName is string && data.groupName.size() <= 150))
         && (!('teacherEmail' in data) || (data.teacherEmail is string && data.teacherEmail.size() <= 200))
         && (!('notes' in data) || (data.notes is string && data.notes.size() <= 1000));
     }
@@ -61,13 +68,54 @@ service cloud.firestore {
       return id is string && id.size() > 0 && id.size() <= 200 && id.matches('^[a-zA-Z0-9_\\-@.]+$');
     }
 
+    function isValidCompetition(data) {
+      return data.keys().hasAll(['id', 'name', 'category', 'term', 'allowedScores', 'order', 'isActive'])
+        && data.keys().hasOnly(['id', 'name', 'category', 'term', 'allowedScores', 'order', 'isActive', 'description', 'updatedAt', 'recipientMode', 'customStudentIds'])
+        && data.id is string && data.id.size() > 0 && data.id.size() <= 128
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 200
+        && data.category is string && data.category.size() > 0 && data.category.size() <= 100
+        && isValidCompetitionTerm(data.term)
+        && data.allowedScores is list && data.allowedScores.size() > 0 && data.allowedScores.size() <= 50
+        && data.order is number && data.order >= 0 && data.order <= 1000
+        && data.isActive is bool
+        && (!('description' in data) || (data.description is string && data.description.size() <= 1000))
+        && (!('updatedAt' in data) || (data.updatedAt is number))
+        && (!('recipientMode' in data) || (data.recipientMode in ['whole_school', 'custom_roster']))
+        && (!('customStudentIds' in data) || (data.customStudentIds is list && data.customStudentIds.size() <= 300));
+    }
+
+    function isValidStudent(data) {
+      return data.keys().hasAll(['id', 'name', 'houseId', 'yearLevel'])
+        && data.keys().hasOnly(['id', 'name', 'houseId', 'yearLevel', 'tutorGroup', 'updatedAt'])
+        && data.id is string && data.id.size() > 0 && data.id.size() <= 128
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 150
+        && isValidHouseId(data.houseId)
+        && data.yearLevel is number && data.yearLevel >= 1 && data.yearLevel <= 13
+        && (!('tutorGroup' in data) || (data.tutorGroup is string && data.tutorGroup.size() <= 30))
+        && (!('updatedAt' in data) || (data.updatedAt is number));
+    }
+
+    function isValidGroup(data) {
+      return data.keys().hasAll(['id', 'name', 'type', 'houseId', 'studentIds'])
+        && data.keys().hasOnly(['id', 'name', 'type', 'houseId', 'competitionId', 'studentIds', 'description', 'createdBy', 'updatedAt'])
+        && data.id is string && data.id.size() > 0 && data.id.size() <= 128
+        && data.name is string && data.name.size() > 0 && data.name.size() <= 150
+        && data.type in ['team', 'group']
+        && isValidHouseId(data.houseId)
+        && data.studentIds is list && data.studentIds.size() <= 100
+        && (!('competitionId' in data) || (data.competitionId is string && data.competitionId.size() <= 128))
+        && (!('description' in data) || (data.description is string && data.description.size() <= 500))
+        && (!('createdBy' in data) || (data.createdBy is string && data.createdBy.size() <= 150))
+        && (!('updatedAt' in data) || (data.updatedAt is number));
+    }
+
     // Point Events Collection:
     // Public read for assembly hall screens, mobile phones, and community leaderboard.
-    // Creating scoring entries is permitted for valid point events.
+    // Creating scoring entries (positive awards or negative deductions) is permitted for signed-in staff and admin.
     // Deleting or modifying ledger events is strictly restricted to Admin (Herman F.).
     match /pointEvents/{eventId} {
       allow read: if true;
-      allow create: if isValidId(eventId) && isValidPointEvent(request.resource.data);
+      allow create: if isValidId(eventId) && (isSignedIn() || isAdmin()) && isValidPointEvent(request.resource.data);
       allow update: if isValidId(eventId)
         && isAdmin()
         && isValidPointEvent(request.resource.data)
@@ -88,19 +136,31 @@ service cloud.firestore {
     // Competitions Collection:
     // Holds school competitions with ordered display index, category, term, and allowed point score presets.
     // Public read so teachers and leaderboard can read configured competitions.
-    // Create, update, delete permitted for signed-in staff and admin.
+    // Create, update, delete permitted for signed-in staff and admin with schema validation.
     match /competitions/{competitionId} {
       allow read: if true;
-      allow create, update, delete: if isSignedIn() || isAdmin();
+      allow create, update: if isValidId(competitionId) && (isSignedIn() || isAdmin()) && isValidCompetition(request.resource.data);
+      allow delete: if isValidId(competitionId) && isAdmin();
     }
 
-    // Students Collection:
-    // Holds the student directory across the 4 GBHS houses.
+    // Students (Learners) Collection:
+    // Holds the learner directory across the 4 GBHS houses.
     // Public read for name selector during points award.
-    // Create, update, delete permitted for signed-in staff and admin.
+    // Create, update, delete permitted for signed-in staff and admin with schema validation.
     match /students/{studentId} {
       allow read: if true;
-      allow create, update, delete: if isSignedIn() || isAdmin();
+      allow create, update: if isValidId(studentId) && (isSignedIn() || isAdmin()) && isValidStudent(request.resource.data);
+      allow delete: if isValidId(studentId) && (isSignedIn() || isAdmin());
+    }
+
+    // Groups & Teams Collection:
+    // Holds named competition teams and house groups with assigned learners.
+    // Public read for team/group scoring and display.
+    // Create, update, delete permitted for signed-in staff and admin with schema validation.
+    match /groups/{groupId} {
+      allow read: if true;
+      allow create, update: if isValidId(groupId) && (isSignedIn() || isAdmin()) && isValidGroup(request.resource.data);
+      allow delete: if isValidId(groupId) && (isSignedIn() || isAdmin());
     }
   }
 }

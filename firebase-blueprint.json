@@ -2,7 +2,7 @@
   "entities": {
     "pointEvent": {
       "title": "Point Event",
-      "description": "Represents an individual score allocation to a house by an authorized teacher",
+      "description": "Represents an individual score allocation or deduction to a house, group, team, or learners by an authorized teacher",
       "type": "object",
       "properties": {
         "id": {
@@ -52,6 +52,21 @@
         "notes": {
           "type": "string",
           "maxLength": 1000
+        },
+        "competitionId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "studentRecipients": {
+          "type": "array"
+        },
+        "groupId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "groupName": {
+          "type": "string",
+          "maxLength": 150
         }
       },
       "required": [
@@ -93,16 +108,188 @@
         "email",
         "name"
       ]
+    },
+    "competition": {
+      "title": "Competition",
+      "description": "School house competition configuration with ordered priority, default point tiers, and participant roster settings",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 200
+        },
+        "category": {
+          "type": "string",
+          "maxLength": 100
+        },
+        "term": {
+          "type": "string",
+          "enum": [
+            "Term 1",
+            "Term 2",
+            "Term 3",
+            "Term 4",
+            "All Year"
+          ]
+        },
+        "allowedScores": {
+          "type": "array"
+        },
+        "order": {
+          "type": "number"
+        },
+        "isActive": {
+          "type": "boolean"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 1000
+        },
+        "updatedAt": {
+          "type": "number"
+        },
+        "recipientMode": {
+          "type": "string",
+          "enum": [
+            "whole_school",
+            "custom_roster"
+          ]
+        },
+        "customStudentIds": {
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "category",
+        "term",
+        "allowedScores",
+        "order",
+        "isActive"
+      ]
+    },
+    "student": {
+      "title": "Learner",
+      "description": "GBHS learner record assigned to a house, year level, and tutor group",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "houseId": {
+          "type": "string",
+          "enum": [
+            "tawhirimatea",
+            "tumatauenga",
+            "tangaroa",
+            "tanemahuta"
+          ]
+        },
+        "yearLevel": {
+          "type": "number"
+        },
+        "tutorGroup": {
+          "type": "string",
+          "maxLength": 30
+        },
+        "updatedAt": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "houseId",
+        "yearLevel"
+      ]
+    },
+    "group": {
+      "title": "Team or Group",
+      "description": "Named house team or group created for house competitions with enrolled learner members",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "team",
+            "group"
+          ]
+        },
+        "houseId": {
+          "type": "string",
+          "enum": [
+            "tawhirimatea",
+            "tumatauenga",
+            "tangaroa",
+            "tanemahuta"
+          ]
+        },
+        "competitionId": {
+          "type": "string",
+          "maxLength": 128
+        },
+        "studentIds": {
+          "type": "array"
+        },
+        "description": {
+          "type": "string",
+          "maxLength": 500
+        },
+        "createdBy": {
+          "type": "string",
+          "maxLength": 150
+        },
+        "updatedAt": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "type",
+        "houseId",
+        "studentIds"
+      ]
     }
   },
   "firestore": {
     "/pointEvents/{eventId}": {
       "schema": "pointEvent",
-      "description": "Live house point transactions visible to all students, staff, and assembly screens"
+      "description": "Live house point transactions (positive awards and negative deductions) visible to all students, staff, and assembly screens"
     },
     "/authorizedTeachers/{teacherId}": {
       "schema": "authorizedTeacher",
-      "description": "Directory of teachers authorized to award house points, synced from TEACHERS_26"
+      "description": "Directory of teachers authorized to award house points"
+    },
+    "/competitions/{competitionId}": {
+      "schema": "competition",
+      "description": "Configured house competitions and official default point tiers"
+    },
+    "/students/{studentId}": {
+      "schema": "student",
+      "description": "School learner directory across the four GBHS houses"
+    },
+    "/groups/{groupId}": {
+      "schema": "group",
+      "description": "House competition teams and groups with assigned learners"
     }
   }
 }

@@ -15,7 +15,7 @@ import {
 } from 'firebase/firestore';
 import { db, auth, handleFirestoreError, OperationType, testFirestoreConnection } from '../services/firebase';
 import { onAuthStateChanged } from 'firebase/auth';
-import { House, HouseId, PointEvent, TeacherUser, TeacherAccount, SchoolTerm, PointCategory, Competition, Student } from '../types';
+import { House, HouseId, PointEvent, TeacherUser, TeacherAccount, SchoolTerm, PointCategory, Competition, Student, RecipientGroup } from '../types';
 import { INITIAL_HOUSES, INITIAL_POINT_EVENTS, INITIAL_AUTHORIZED_TEACHERS, INITIAL_COMPETITIONS, INITIAL_STUDENTS } from '../data/initialData';
 import { soundManager } from '../utils/audio';
 import {
@@ -30,6 +30,7 @@ const STORAGE_AUTH_KEY = 'gbhs_teacher_auth_v3';
 const STORAGE_SHEET_TEACHERS_KEY = 'gbhs_sheet_teachers_v3';
 const STORAGE_COMPETITIONS_KEY = 'gbhs_competitions_v1';
 const STORAGE_STUDENTS_KEY = 'gbhs_students_v1';
+const STORAGE_GROUPS_KEY = 'gbhs_groups_v1';
 
 export type AppView = 'assembly' | 'teacher-login' | 'teacher-portal';
 
@@ -43,6 +44,14 @@ interface HousePointsContextType {
   selectedCategory: PointCategory | 'All Categories';
   setSelectedCategory: (cat: PointCategory | 'All Categories') => void;
   students: Student[];
+  addStudent: (student: Omit<Student, 'id'>) => Promise<Student>;
+  bulkAddStudents: (students: Omit<Student, 'id'>[]) => Promise<number>;
+  updateStudent: (id: string, updated: Partial<Student>) => Promise<void>;
+  deleteStudent: (id: string) => Promise<void>;
+  groups: RecipientGroup[];
+  addGroup: (group: Omit<RecipientGroup, 'id' | 'updatedAt'>) => Promise<RecipientGroup>;
+  updateGroup: (id: string, updated: Partial<RecipientGroup>) => Promise<void>;
+  deleteGroup: (id: string) => Promise<void>;
   competitions: Competition[];
   addCompetition: (comp: Omit<Competition, 'id' | 'updatedAt'>) => Promise<void>;
   updateCompetition: (id: string, updated: Partial<Competition>) => Promise<void>;
@@ -134,6 +143,18 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     return INITIAL_STUDENTS;
   });
 
+  // Teams & Groups created for house competitions (synced with Cloud Firestore)
+  const [groups, setGroups] = useState<RecipientGroup[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_GROUPS_KEY);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  });
+
   // Teacher user session (authenticated via Google)
   const [teacherUser, setTeacherUser] = useState<TeacherUser | null>(() => {
     try {
@@ -181,6 +202,12 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
       localStorage.setItem(STORAGE_STUDENTS_KEY, JSON.stringify(students));
     } catch {}
   }, [students]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_GROUPS_KEY, JSON.stringify(groups));
+    } catch {}
+  }, [groups]);
 
   useEffect(() => {
     try {
@@ -280,8 +307,8 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
             });
           });
           setAuthorizedTeachers(liveTeachers);
-        } else {
-          // Pre-seed default teachers to Firestore
+        } else if (auth.currentUser) {
+          // Pre-seed default teachers to Firestore when authenticated
           try {
             const batch = writeBatch(db);
             INITIAL_AUTHORIZED_TEACHERS.forEach((t) => {
@@ -323,8 +350,8 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
           });
           liveComps.sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
           setCompetitions(liveComps);
-        } else {
-          // Pre-seed default competitions to Firestore
+        } else if (auth.currentUser) {
+          // Pre-seed default competitions to Firestore when authenticated
           try {
             const batch = writeBatch(db);
             INITIAL_COMPETITIONS.forEach((c, idx) => {
@@ -365,9 +392,10 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
               id: d.id,
             });
           });
+          liveStudents.sort((a, b) => a.name.localeCompare(b.name));
           setStudents(liveStudents);
-        } else {
-          // Pre-seed initial student population into Firestore
+        } else if (auth.currentUser) {
+          // Pre-seed initial student population into Firestore when authenticated
           try {
             const batch = writeBatch(db);
             INITIAL_STUDENTS.forEach((s) => {
@@ -391,11 +419,38 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
       }
     );
 
+    // Sync house competition teams & groups in real time from Firestore
+    const groupsRef = collection(db, 'groups');
+    const unsubscribeGroups = onSnapshot(
+      groupsRef,
+      (snapshot) => {
+        const liveGroups: RecipientGroup[] = [];
+        snapshot.forEach((d) => {
+          liveGroups.push({
+            ...(d.data() as RecipientGroup),
+            id: d.id,
+          });
+        });
+        liveGroups.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+        setGroups(liveGroups);
+      },
+      (error) => {
+        const isUnavailable =
+          error.code === 'unavailable' ||
+          error.message?.includes('offline') ||
+          error.message?.includes('Could not reach Cloud Firestore');
+        if (!isUnavailable) {
+          console.warn('Real-time groups sync warning:', error);
+        }
+      }
+    );
+
     return () => {
       unsubscribeEvents();
       unsubscribeTeachers();
       unsubscribeCompetitions();
       unsubscribeStudents();
+      unsubscribeGroups();
     };
   }, []);
 
@@ -797,6 +852,197 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   };
 
   /**
+   * LEARNERS (STUDENTS) MANAGEMENT:
+   * Add, bulk import, edit, and remove learners synced in real time via Cloud Firestore.
+   */
+  const addStudent = async (student: Omit<Student, 'id'>): Promise<Student> => {
+    const stuId = `stu_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const cleanPayload: Record<string, any> = {
+      id: stuId,
+      name: student.name.trim().slice(0, 150),
+      houseId: student.houseId,
+      yearLevel: Number(student.yearLevel) || 9,
+      updatedAt: Date.now(),
+    };
+    if (student.tutorGroup && student.tutorGroup.trim()) {
+      cleanPayload.tutorGroup = student.tutorGroup.trim().slice(0, 30);
+    }
+
+    const newStudent = cleanPayload as Student;
+    setStudents((prev) => [...prev, newStudent].sort((a, b) => a.name.localeCompare(b.name)));
+
+    try {
+      await setDoc(doc(db, 'students', stuId), cleanPayload);
+      return newStudent;
+    } catch (err) {
+      console.error('Failed to add learner:', err);
+      handleFirestoreError(err, OperationType.CREATE, `students/${stuId}`);
+      throw err;
+    }
+  };
+
+  const bulkAddStudents = async (newStudentsList: Omit<Student, 'id'>[]): Promise<number> => {
+    if (!newStudentsList.length) return 0;
+    const created: Student[] = [];
+    const batch = writeBatch(db);
+    const now = Date.now();
+
+    newStudentsList.forEach((student, idx) => {
+      const stuId = `stu_${now}_${idx}_${Math.random().toString(36).substring(2, 5)}`;
+      const cleanPayload: Record<string, any> = {
+        id: stuId,
+        name: student.name.trim().slice(0, 150),
+        houseId: student.houseId,
+        yearLevel: Math.min(Math.max(Number(student.yearLevel) || 9, 1), 13),
+        updatedAt: now,
+      };
+      if (student.tutorGroup && student.tutorGroup.trim()) {
+        cleanPayload.tutorGroup = student.tutorGroup.trim().slice(0, 30);
+      }
+      created.push(cleanPayload as Student);
+      batch.set(doc(db, 'students', stuId), cleanPayload);
+    });
+
+    setStudents((prev) => [...prev, ...created].sort((a, b) => a.name.localeCompare(b.name)));
+
+    try {
+      await batch.commit();
+      return created.length;
+    } catch (err) {
+      console.error('Failed to bulk import learners:', err);
+      handleFirestoreError(err, OperationType.WRITE, 'students');
+      throw err;
+    }
+  };
+
+  const updateStudent = async (id: string, updated: Partial<Student>) => {
+    const existing = students.find((s) => s.id === id);
+    if (!existing) return;
+
+    const cleanPayload: Record<string, any> = {
+      id,
+      name: (updated.name ?? existing.name).trim().slice(0, 150),
+      houseId: updated.houseId ?? existing.houseId,
+      yearLevel: Math.min(Math.max(Number(updated.yearLevel ?? existing.yearLevel) || 9, 1), 13),
+      updatedAt: Date.now(),
+    };
+    const nextTutor = updated.tutorGroup !== undefined ? updated.tutorGroup : existing.tutorGroup;
+    if (nextTutor && nextTutor.trim()) {
+      cleanPayload.tutorGroup = nextTutor.trim().slice(0, 30);
+    }
+
+    setStudents((prev) =>
+      prev
+        .map((s) => (s.id === id ? (cleanPayload as Student) : s))
+        .sort((a, b) => a.name.localeCompare(b.name))
+    );
+
+    try {
+      await setDoc(doc(db, 'students', id), cleanPayload);
+    } catch (err) {
+      console.error('Failed to update learner:', err);
+      handleFirestoreError(err, OperationType.UPDATE, `students/${id}`);
+      throw err;
+    }
+  };
+
+  const deleteStudent = async (id: string) => {
+    setStudents((prev) => prev.filter((s) => s.id !== id));
+    try {
+      await deleteDoc(doc(db, 'students', id));
+    } catch (err) {
+      console.error('Failed to delete learner:', err);
+      handleFirestoreError(err, OperationType.DELETE, `students/${id}`);
+      throw err;
+    }
+  };
+
+  /**
+   * TEAMS & GROUPS MANAGEMENT:
+   * Create, edit, and delete named house teams and groups for house competitions.
+   */
+  const addGroup = async (group: Omit<RecipientGroup, 'id' | 'updatedAt'>): Promise<RecipientGroup> => {
+    const grpId = `grp_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+    const cleanPayload: Record<string, any> = {
+      id: grpId,
+      name: group.name.trim().slice(0, 150),
+      type: group.type || 'group',
+      houseId: group.houseId,
+      studentIds: (group.studentIds || []).slice(0, 100),
+      updatedAt: Date.now(),
+    };
+    if (group.competitionId && group.competitionId.trim()) {
+      cleanPayload.competitionId = group.competitionId.trim().slice(0, 128);
+    }
+    if (group.description && group.description.trim()) {
+      cleanPayload.description = group.description.trim().slice(0, 500);
+    }
+    const creator = group.createdBy || teacherUser?.name || 'GBHS Staff';
+    if (creator) {
+      cleanPayload.createdBy = creator.trim().slice(0, 150);
+    }
+
+    const newGroup = cleanPayload as RecipientGroup;
+    setGroups((prev) => [newGroup, ...prev]);
+
+    try {
+      await setDoc(doc(db, 'groups', grpId), cleanPayload);
+      return newGroup;
+    } catch (err) {
+      console.error('Failed to create group:', err);
+      handleFirestoreError(err, OperationType.CREATE, `groups/${grpId}`);
+      throw err;
+    }
+  };
+
+  const updateGroup = async (id: string, updated: Partial<RecipientGroup>) => {
+    const existing = groups.find((g) => g.id === id);
+    if (!existing) return;
+
+    const cleanPayload: Record<string, any> = {
+      id,
+      name: (updated.name ?? existing.name).trim().slice(0, 150),
+      type: updated.type ?? existing.type,
+      houseId: updated.houseId ?? existing.houseId,
+      studentIds: (updated.studentIds ?? existing.studentIds ?? []).slice(0, 100),
+      updatedAt: Date.now(),
+    };
+
+    const nextCompId = updated.competitionId !== undefined ? updated.competitionId : existing.competitionId;
+    if (nextCompId && nextCompId.trim()) {
+      cleanPayload.competitionId = nextCompId.trim().slice(0, 128);
+    }
+    const nextDesc = updated.description !== undefined ? updated.description : existing.description;
+    if (nextDesc && nextDesc.trim()) {
+      cleanPayload.description = nextDesc.trim().slice(0, 500);
+    }
+    if (existing.createdBy) {
+      cleanPayload.createdBy = existing.createdBy;
+    }
+
+    setGroups((prev) => prev.map((g) => (g.id === id ? (cleanPayload as RecipientGroup) : g)));
+
+    try {
+      await setDoc(doc(db, 'groups', id), cleanPayload);
+    } catch (err) {
+      console.error('Failed to update group:', err);
+      handleFirestoreError(err, OperationType.UPDATE, `groups/${id}`);
+      throw err;
+    }
+  };
+
+  const deleteGroup = async (id: string) => {
+    setGroups((prev) => prev.filter((g) => g.id !== id));
+    try {
+      await deleteDoc(doc(db, 'groups', id));
+    } catch (err) {
+      console.error('Failed to delete group:', err);
+      handleFirestoreError(err, OperationType.DELETE, `groups/${id}`);
+      throw err;
+    }
+  };
+
+  /**
    * Primary Teacher Google Login Flow:
    * 1. Signs in via genuine Google OAuth popup using standard profile and email scopes.
    * 2. Checks user's verified Google account email against the Cloud Firestore authorizedTeachers database.
@@ -901,8 +1147,9 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
    * Writes to Cloud Firestore. All connected screens receive live updates instantly.
    */
   const addPoints = async (data: Omit<PointEvent, 'id' | 'timestamp'>) => {
-    // Enable celebration for authentic point award
-    allowLeadCelebrationRef.current = true;
+    const numericPoints = Number(data.points);
+    // Only celebrate positive awards; negative deductions must not trigger confetti or fanfare
+    allowLeadCelebrationRef.current = numericPoints > 0;
 
     const teacherEmail = (
       teacherUser?.email ||
@@ -914,25 +1161,33 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     const cleanPayload: Record<string, any> = {
       id: 'pe-' + Date.now() + '-' + Math.random().toString(36).substring(2, 6),
       houseId: data.houseId,
-      points: Number(data.points),
-      title: data.title.trim(),
+      points: numericPoints,
+      title: data.title.trim().slice(0, 300),
       category: data.category,
       term: data.term,
-      awardedBy: data.awardedBy.trim(),
+      awardedBy: data.awardedBy.trim().slice(0, 150),
       timestamp: Date.now(),
-      teacherEmail,
+      teacherEmail: teacherEmail.slice(0, 200),
     };
 
     if (data.notes && data.notes.trim()) {
-      cleanPayload.notes = data.notes.trim();
+      cleanPayload.notes = data.notes.trim().slice(0, 1000);
     }
 
     if (data.studentRecipients && data.studentRecipients.length > 0) {
-      cleanPayload.studentRecipients = data.studentRecipients;
+      cleanPayload.studentRecipients = data.studentRecipients.slice(0, 100);
     }
 
-    if ((data as any).competitionId) {
-      cleanPayload.competitionId = (data as any).competitionId;
+    if (data.competitionId) {
+      cleanPayload.competitionId = data.competitionId.slice(0, 128);
+    }
+
+    if (data.groupId) {
+      cleanPayload.groupId = data.groupId.slice(0, 128);
+    }
+
+    if (data.groupName && data.groupName.trim()) {
+      cleanPayload.groupName = data.groupName.trim().slice(0, 150);
     }
 
     try {
@@ -944,10 +1199,14 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
 
     // Play sound and launch confetti once write is confirmed to Cloud Firestore
-    soundManager.playPointAward(data.points);
-    const house = INITIAL_HOUSES[data.houseId];
-    if (house) {
-      triggerConfetti([house.primaryColor, house.secondaryColor, '#ffffff']);
+    if (numericPoints < 0) {
+      soundManager.playPointDeduction();
+    } else {
+      soundManager.playPointAward(numericPoints);
+      const house = INITIAL_HOUSES[data.houseId];
+      if (house) {
+        triggerConfetti([house.primaryColor, house.secondaryColor, '#ffffff']);
+      }
     }
   };
 
@@ -1074,7 +1333,7 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   };
 
   const exportLedgerCSV = () => {
-    const headers = ['ID', 'House', 'Points', 'Category', 'Term', 'Title', 'StudentRecipients', 'AwardedBy', 'Date', 'Notes'];
+    const headers = ['ID', 'House', 'Points', 'Category', 'Term', 'Title', 'GroupOrTeam', 'StudentRecipients', 'AwardedBy', 'Date', 'Notes'];
     const rows = events.map((e) => [
       e.id,
       INITIAL_HOUSES[e.houseId]?.name || e.houseId,
@@ -1082,6 +1341,7 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
       `"${e.category}"`,
       e.term,
       `"${e.title.replace(/"/g, '""')}"`,
+      `"${(e.groupName || '').replace(/"/g, '""')}"`,
       `"${(e.studentRecipients || []).join('; ').replace(/"/g, '""')}"`,
       `"${e.awardedBy}"`,
       new Date(e.timestamp).toISOString(),
@@ -1118,6 +1378,14 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
         setSelectedCategory,
         competitions,
         students,
+        addStudent,
+        bulkAddStudents,
+        updateStudent,
+        deleteStudent,
+        groups,
+        addGroup,
+        updateGroup,
+        deleteGroup,
         addCompetition,
         updateCompetition,
         deleteCompetition,

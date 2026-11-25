@@ -131,7 +131,7 @@ export const AssemblyIndexView: React.FC = () => {
               className="w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full shadow-sm shrink-0"
               style={{ backgroundColor: currentLeader?.primaryColor || '#dc2626' }}
             />
-            {currentLeader && currentLeader.currentTotal > 0 ? (
+            {houses.some((h) => h.currentTotal !== 0) ? (
               <span className="truncate">
                 <strong className="text-white">{currentLeader?.name}</strong> leads by{' '}
                 <span className="text-amber-400 font-mono font-bold">
@@ -150,8 +150,9 @@ export const AssemblyIndexView: React.FC = () => {
         {/* 4 House Stadium Columns — FIXED IN ONE SINGLE ROW ACROSS ALL DEVICES */}
         <div className="w-full max-w-6xl grid grid-cols-4 gap-1.5 xs:gap-2 sm:gap-4 md:gap-6 lg:gap-8 items-end h-[56vh] xs:h-[60vh] sm:h-[64vh] md:h-[68vh] max-h-[640px]">
           {houses.map((house) => {
+            const hasNonZero = houses.some((h) => h.currentTotal !== 0);
             // Scale bar height between 30% (so responsive full-width logo with padding always fits at top) and 100%
-            const percentage = maxPoints > 0 ? Math.max((house.currentTotal / maxPoints) * 100, 30) : 30;
+            const percentage = maxPoints > 0 ? Math.min(Math.max((house.currentTotal / maxPoints) * 100, 30), 100) : 30;
             const isFirst = house.rank === 1;
 
             return (
@@ -159,13 +160,13 @@ export const AssemblyIndexView: React.FC = () => {
                 {/* Live Score & Rank above the bar pillar */}
                 <div className="mb-1.5 xs:mb-2 sm:mb-3 flex flex-col items-center text-center transform transition-transform duration-300 group-hover:-translate-y-1 w-full px-0.5">
                   {/* Rank Badge */}
-                  {house.currentTotal > 0 && isFirst ? (
+                  {hasNonZero && isFirst ? (
                     <div className="mb-1 px-1.5 xs:px-2 sm:px-3 py-0.5 rounded-full bg-amber-500/20 border border-amber-400/60 text-amber-300 text-[9px] xs:text-[10px] sm:text-xs font-black flex items-center justify-center gap-1 shadow-sm shrink-0">
                       <Trophy className="w-2.5 h-2.5 xs:w-3 xs:h-3 sm:w-3.5 sm:h-3.5 text-amber-300 shrink-0" />
                       <span className="hidden xs:inline">1ST PLACE</span>
                       <span className="xs:hidden">1ST</span>
                     </div>
-                  ) : house.currentTotal > 0 ? (
+                  ) : hasNonZero ? (
                     <div className="mb-1 px-1.5 xs:px-2 sm:px-2.5 py-0.5 rounded-full bg-neutral-900 border border-neutral-800 text-neutral-400 text-[9px] xs:text-[10px] sm:text-[11px] font-bold font-mono shrink-0">
                       <span className="hidden xs:inline">Rank #{house.rank}</span>
                       <span className="xs:hidden">#{house.rank}</span>
@@ -179,7 +180,11 @@ export const AssemblyIndexView: React.FC = () => {
 
                   {/* Points Total */}
                   <div className="mt-0.5">
-                    <span className="text-base xs:text-xl sm:text-3xl md:text-4xl lg:text-5xl font-black text-white font-mono tabular-nums block tracking-tight leading-none">
+                    <span
+                      className={`text-base xs:text-xl sm:text-3xl md:text-4xl lg:text-5xl font-black font-mono tabular-nums block tracking-tight leading-none ${
+                        house.currentTotal < 0 ? 'text-rose-400' : 'text-white'
+                      }`}
+                    >
                       {house.currentTotal.toLocaleString()}
                     </span>
                     <span className="text-[7px] xs:text-[8px] sm:text-[10px] md:text-xs uppercase tracking-wider text-neutral-400 font-bold block mt-0.5">

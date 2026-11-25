@@ -62,6 +62,38 @@ class SoundManager {
     }
   }
 
+  public playPointDeduction() {
+    if (!this.isEnabled) return;
+    try {
+      this.initCtx();
+      if (!this.ctx) return;
+
+      const now = this.ctx.currentTime;
+      const pitches = [392, 311.13];
+
+      pitches.forEach((freq, idx) => {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, now + idx * 0.1);
+
+        gain.gain.setValueAtTime(0, now + idx * 0.1);
+        gain.gain.linearRampToValueAtTime(0.14, now + idx * 0.1 + 0.02);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.1 + 0.25);
+
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+
+        osc.start(now + idx * 0.1);
+        osc.stop(now + idx * 0.1 + 0.28);
+      });
+    } catch {
+      // Audio autoplay policy catch
+    }
+  }
+
   public playLeadCelebration() {
     if (!this.isEnabled) return;
     try {

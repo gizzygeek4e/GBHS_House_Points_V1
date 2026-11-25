@@ -86,13 +86,14 @@ service cloud.firestore {
 
     function isValidStudent(data) {
       return data.keys().hasAll(['id', 'name', 'houseId', 'yearLevel'])
-        && data.keys().hasOnly(['id', 'name', 'houseId', 'yearLevel', 'tutorGroup', 'updatedAt'])
+        && data.keys().hasOnly(['id', 'name', 'houseId', 'yearLevel', 'tutorGroup', 'updatedAt', 'archived'])
         && data.id is string && data.id.size() > 0 && data.id.size() <= 128
         && data.name is string && data.name.size() > 0 && data.name.size() <= 150
         && isValidHouseId(data.houseId)
         && data.yearLevel is number && data.yearLevel >= 1 && data.yearLevel <= 13
         && (!('tutorGroup' in data) || (data.tutorGroup is string && data.tutorGroup.size() <= 30))
-        && (!('updatedAt' in data) || (data.updatedAt is number));
+        && (!('updatedAt' in data) || (data.updatedAt is number))
+        && (!('archived' in data) || (data.archived is bool));
     }
 
     function isValidGroup(data) {

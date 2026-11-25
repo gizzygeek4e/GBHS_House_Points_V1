@@ -44,10 +44,15 @@ interface HousePointsContextType {
   selectedCategory: PointCategory | 'All Categories';
   setSelectedCategory: (cat: PointCategory | 'All Categories') => void;
   students: Student[];
+  archivedStudents: Student[];
+  allStudents: Student[];
   addStudent: (student: Omit<Student, 'id'>) => Promise<Student>;
   bulkAddStudents: (students: Omit<Student, 'id'>[]) => Promise<number>;
   updateStudent: (id: string, updated: Partial<Student>) => Promise<void>;
   deleteStudent: (id: string) => Promise<void>;
+  clearLearnerDirectory: () => Promise<number>;
+  restoreStudent: (id: string) => Promise<void>;
+  restoreAllArchivedStudents: () => Promise<number>;
   groups: RecipientGroup[];
   addGroup: (group: Omit<RecipientGroup, 'id' | 'updatedAt'>) => Promise<RecipientGroup>;
   updateGroup: (id: string, updated: Partial<RecipientGroup>) => Promise<void>;
@@ -131,8 +136,8 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     return INITIAL_COMPETITIONS;
   });
 
-  // GBHS Student Database (Whole School Population synced with Cloud Firestore)
-  const [students, setStudents] = useState<Student[]>(() => {
+  // GBHS Student Database (Whole School Population synced with Cloud Firestore, supporting non-destructive archiving)
+  const [allStudents, setAllStudents] = useState<Student[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_STUDENTS_KEY);
       if (saved) {
@@ -142,6 +147,16 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     } catch {}
     return INITIAL_STUDENTS;
   });
+
+  const students = useMemo(
+    () => allStudents.filter((s) => !s.archived).sort((a, b) => a.name.localeCompare(b.name)),
+    [allStudents]
+  );
+
+  const archivedStudents = useMemo(
+    () => allStudents.filter((s) => !!s.archived).sort((a, b) => a.name.localeCompare(b.name)),
+    [allStudents]
+  );
 
   // Teams & Groups created for house competitions (synced with Cloud Firestore)
   const [groups, setGroups] = useState<RecipientGroup[]>(() => {
@@ -199,9 +214,9 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   useEffect(() => {
     try {
-      localStorage.setItem(STORAGE_STUDENTS_KEY, JSON.stringify(students));
+      localStorage.setItem(STORAGE_STUDENTS_KEY, JSON.stringify(allStudents));
     } catch {}
-  }, [students]);
+  }, [allStudents]);
 
   useEffect(() => {
     try {
@@ -393,7 +408,7 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
             });
           });
           liveStudents.sort((a, b) => a.name.localeCompare(b.name));
-          setStudents(liveStudents);
+          setAllStudents(liveStudents);
         } else if (auth.currentUser) {
           // Pre-seed initial student population into Firestore when authenticated
           try {
@@ -853,7 +868,7 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
 
   /**
    * LEARNERS (STUDENTS) MANAGEMENT:
-   * Add, bulk import, edit, and remove learners synced in real time via Cloud Firestore.
+   * Add, bulk import, edit, archive/clear directory (non-destructive), restore, and remove learners synced in real time via Cloud Firestore.
    */
   const addStudent = async (student: Omit<Student, 'id'>): Promise<Student> => {
     const stuId = `stu_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
@@ -861,15 +876,16 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
       id: stuId,
       name: student.name.trim().slice(0, 150),
       houseId: student.houseId,
-      yearLevel: Number(student.yearLevel) || 9,
+      yearLevel: Math.min(Math.max(Number(student.yearLevel) || 9, 1), 13),
       updatedAt: Date.now(),
+      archived: false,
     };
     if (student.tutorGroup && student.tutorGroup.trim()) {
       cleanPayload.tutorGroup = student.tutorGroup.trim().slice(0, 30);
     }
 
     const newStudent = cleanPayload as Student;
-    setStudents((prev) => [...prev, newStudent].sort((a, b) => a.name.localeCompare(b.name)));
+    setAllStudents((prev) => [...prev, newStudent].sort((a, b) => a.name.localeCompare(b.name)));
 
     try {
       await setDoc(doc(db, 'students', stuId), cleanPayload);
@@ -884,7 +900,6 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   const bulkAddStudents = async (newStudentsList: Omit<Student, 'id'>[]): Promise<number> => {
     if (!newStudentsList.length) return 0;
     const created: Student[] = [];
-    const batch = writeBatch(db);
     const now = Date.now();
 
     newStudentsList.forEach((student, idx) => {
@@ -895,18 +910,26 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
         houseId: student.houseId,
         yearLevel: Math.min(Math.max(Number(student.yearLevel) || 9, 1), 13),
         updatedAt: now,
+        archived: false,
       };
       if (student.tutorGroup && student.tutorGroup.trim()) {
         cleanPayload.tutorGroup = student.tutorGroup.trim().slice(0, 30);
       }
       created.push(cleanPayload as Student);
-      batch.set(doc(db, 'students', stuId), cleanPayload);
     });
 
-    setStudents((prev) => [...prev, ...created].sort((a, b) => a.name.localeCompare(b.name)));
+    setAllStudents((prev) => [...prev, ...created].sort((a, b) => a.name.localeCompare(b.name)));
 
     try {
-      await batch.commit();
+      const CHUNK_SIZE = 450;
+      for (let i = 0; i < created.length; i += CHUNK_SIZE) {
+        const batch = writeBatch(db);
+        const chunk = created.slice(i, i + CHUNK_SIZE);
+        chunk.forEach((stu) => {
+          batch.set(doc(db, 'students', stu.id), stu);
+        });
+        await batch.commit();
+      }
       return created.length;
     } catch (err) {
       console.error('Failed to bulk import learners:', err);
@@ -916,7 +939,7 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   };
 
   const updateStudent = async (id: string, updated: Partial<Student>) => {
-    const existing = students.find((s) => s.id === id);
+    const existing = allStudents.find((s) => s.id === id);
     if (!existing) return;
 
     const cleanPayload: Record<string, any> = {
@@ -925,13 +948,14 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
       houseId: updated.houseId ?? existing.houseId,
       yearLevel: Math.min(Math.max(Number(updated.yearLevel ?? existing.yearLevel) || 9, 1), 13),
       updatedAt: Date.now(),
+      archived: updated.archived !== undefined ? !!updated.archived : !!existing.archived,
     };
     const nextTutor = updated.tutorGroup !== undefined ? updated.tutorGroup : existing.tutorGroup;
     if (nextTutor && nextTutor.trim()) {
       cleanPayload.tutorGroup = nextTutor.trim().slice(0, 30);
     }
 
-    setStudents((prev) =>
+    setAllStudents((prev) =>
       prev
         .map((s) => (s.id === id ? (cleanPayload as Student) : s))
         .sort((a, b) => a.name.localeCompare(b.name))
@@ -947,12 +971,101 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   };
 
   const deleteStudent = async (id: string) => {
-    setStudents((prev) => prev.filter((s) => s.id !== id));
+    setAllStudents((prev) => prev.filter((s) => s.id !== id));
     try {
       await deleteDoc(doc(db, 'students', id));
     } catch (err) {
       console.error('Failed to delete learner:', err);
       handleFirestoreError(err, OperationType.DELETE, `students/${id}`);
+      throw err;
+    }
+  };
+
+  /**
+   * CLEAR LEARNER DIRECTORY (NON-DESTRUCTIVE ARCHIVE):
+   * Moves all active learners to archived=true so the active directory is cleared
+   * for mid-year updates without deleting learner records or any points allocated to learners.
+   */
+  const clearLearnerDirectory = async (): Promise<number> => {
+    const activeList = allStudents.filter((s) => !s.archived);
+    if (activeList.length === 0) return 0;
+
+    const now = Date.now();
+    const activeIds = new Set(activeList.map((s) => s.id));
+
+    setAllStudents((prev) =>
+      prev.map((s) => (activeIds.has(s.id) ? { ...s, archived: true, updatedAt: now } : s))
+    );
+
+    try {
+      const CHUNK_SIZE = 450;
+      for (let i = 0; i < activeList.length; i += CHUNK_SIZE) {
+        const batch = writeBatch(db);
+        const chunk = activeList.slice(i, i + CHUNK_SIZE);
+        chunk.forEach((stu) => {
+          const payload: Record<string, any> = {
+            id: stu.id,
+            name: stu.name.trim().slice(0, 150),
+            houseId: stu.houseId,
+            yearLevel: Math.min(Math.max(Number(stu.yearLevel) || 9, 1), 13),
+            updatedAt: now,
+            archived: true,
+          };
+          if (stu.tutorGroup && stu.tutorGroup.trim()) {
+            payload.tutorGroup = stu.tutorGroup.trim().slice(0, 30);
+          }
+          batch.set(doc(db, 'students', stu.id), payload);
+        });
+        await batch.commit();
+      }
+      return activeList.length;
+    } catch (err) {
+      console.error('Failed to clear learner directory:', err);
+      handleFirestoreError(err, OperationType.UPDATE, 'students');
+      throw err;
+    }
+  };
+
+  const restoreStudent = async (id: string) => {
+    await updateStudent(id, { archived: false });
+  };
+
+  const restoreAllArchivedStudents = async (): Promise<number> => {
+    const archivedList = allStudents.filter((s) => !!s.archived);
+    if (archivedList.length === 0) return 0;
+
+    const now = Date.now();
+    const archivedIds = new Set(archivedList.map((s) => s.id));
+
+    setAllStudents((prev) =>
+      prev.map((s) => (archivedIds.has(s.id) ? { ...s, archived: false, updatedAt: now } : s))
+    );
+
+    try {
+      const CHUNK_SIZE = 450;
+      for (let i = 0; i < archivedList.length; i += CHUNK_SIZE) {
+        const batch = writeBatch(db);
+        const chunk = archivedList.slice(i, i + CHUNK_SIZE);
+        chunk.forEach((stu) => {
+          const payload: Record<string, any> = {
+            id: stu.id,
+            name: stu.name.trim().slice(0, 150),
+            houseId: stu.houseId,
+            yearLevel: Math.min(Math.max(Number(stu.yearLevel) || 9, 1), 13),
+            updatedAt: now,
+            archived: false,
+          };
+          if (stu.tutorGroup && stu.tutorGroup.trim()) {
+            payload.tutorGroup = stu.tutorGroup.trim().slice(0, 30);
+          }
+          batch.set(doc(db, 'students', stu.id), payload);
+        });
+        await batch.commit();
+      }
+      return archivedList.length;
+    } catch (err) {
+      console.error('Failed to restore archived learners:', err);
+      handleFirestoreError(err, OperationType.UPDATE, 'students');
       throw err;
     }
   };
@@ -1378,10 +1491,15 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
         setSelectedCategory,
         competitions,
         students,
+        archivedStudents,
+        allStudents,
         addStudent,
         bulkAddStudents,
         updateStudent,
         deleteStudent,
+        clearLearnerDirectory,
+        restoreStudent,
+        restoreAllArchivedStudents,
         groups,
         addGroup,
         updateGroup,

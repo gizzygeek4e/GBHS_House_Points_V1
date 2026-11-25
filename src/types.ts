@@ -39,6 +39,7 @@ export interface Student {
   yearLevel: number;
   tutorGroup?: string;
   updatedAt?: number;
+  archived?: boolean;
 }
 
 export interface RecipientGroup {

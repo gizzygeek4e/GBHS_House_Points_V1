@@ -204,6 +204,9 @@
         },
         "updatedAt": {
           "type": "number"
+        },
+        "archived": {
+          "type": "boolean"
         }
       },
       "required": [

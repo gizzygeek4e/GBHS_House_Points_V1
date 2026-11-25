@@ -36,6 +36,8 @@ import {
   FolderPlus,
   Upload,
   UsersRound,
+  Archive,
+  ArchiveRestore,
 } from 'lucide-react';
 import { useHousePoints } from '../context/HousePointsContext';
 import {
@@ -78,10 +80,15 @@ export const TeacherPortalDashboard: React.FC = () => {
     triggerConfetti,
     competitions,
     students,
+    archivedStudents,
+    allStudents,
     addStudent,
     bulkAddStudents,
     updateStudent,
     deleteStudent,
+    clearLearnerDirectory,
+    restoreStudent,
+    restoreAllArchivedStudents,
     groups,
     addGroup,
     updateGroup,
@@ -178,6 +185,12 @@ export const TeacherPortalDashboard: React.FC = () => {
   const [bulkLearnersText, setBulkLearnersText] = useState('');
   const [bulkLearnersError, setBulkLearnersError] = useState<string | null>(null);
   const [isImportingLearners, setIsImportingLearners] = useState(false);
+
+  // Clear Directory (Non-Destructive Archive) & Restore State
+  const [showClearLearnersConfirm, setShowClearLearnersConfirm] = useState(false);
+  const [isClearingLearners, setIsClearingLearners] = useState(false);
+  const [showArchivedLearners, setShowArchivedLearners] = useState(false);
+  const [isRestoringLearners, setIsRestoringLearners] = useState(false);
 
   // Sync competition changes to form fields and roster mode
   useEffect(() => {
@@ -303,8 +316,8 @@ export const TeacherPortalDashboard: React.FC = () => {
 
   const selectedGroupMembers = useMemo(() => {
     if (!selectedGroup) return [];
-    return (students || []).filter((s) => selectedGroup.studentIds.includes(s.id));
-  }, [selectedGroup, students]);
+    return (allStudents || []).filter((s) => selectedGroup.studentIds.includes(s.id));
+  }, [selectedGroup, allStudents]);
 
   // Modal helpers for Groups & Learners
   const openCreateGroupModal = (
@@ -552,6 +565,50 @@ export const TeacherPortalDashboard: React.FC = () => {
       setBulkLearnersError(err?.message || 'Failed to bulk import learners.');
     } finally {
       setIsImportingLearners(false);
+    }
+  };
+
+  const handleConfirmClearDirectory = async () => {
+    setIsClearingLearners(true);
+    try {
+      const count = await clearLearnerDirectory();
+      setSelectedStudentIds([]);
+      setShowClearLearnersConfirm(false);
+      setLearnersNotice(
+        `Cleared ${count} learner${count === 1 ? '' : 's'} from the active directory. Records are safely archived (not deleted), and all allocated points remain intact.`
+      );
+      setTimeout(() => setLearnersNotice(null), 5000);
+    } catch (err: any) {
+      setLearnersNotice(`Failed to clear learner directory: ${err?.message || 'Error'}`);
+    } finally {
+      setIsClearingLearners(false);
+    }
+  };
+
+  const handleRestoreSingleLearner = async (student: Student) => {
+    setIsRestoringLearners(true);
+    try {
+      await restoreStudent(student.id);
+      setLearnersNotice(`Restored "${student.name}" to the active learner directory.`);
+      setTimeout(() => setLearnersNotice(null), 3500);
+    } catch (err: any) {
+      setLearnersNotice(`Failed to restore learner: ${err?.message || 'Error'}`);
+    } finally {
+      setIsRestoringLearners(false);
+    }
+  };
+
+  const handleRestoreAllArchived = async () => {
+    setIsRestoringLearners(true);
+    try {
+      const count = await restoreAllArchivedStudents();
+      setShowArchivedLearners(false);
+      setLearnersNotice(`Restored ${count} archived learner${count === 1 ? '' : 's'} back to the active directory.`);
+      setTimeout(() => setLearnersNotice(null), 4000);
+    } catch (err: any) {
+      setLearnersNotice(`Failed to restore archived learners: ${err?.message || 'Error'}`);
+    } finally {
+      setIsRestoringLearners(false);
     }
   };
 
@@ -2902,31 +2959,67 @@ export const TeacherPortalDashboard: React.FC = () => {
               )}
 
               {/* Sub-tab Switcher */}
-              <div className="flex items-center gap-2 border-b border-neutral-800 pb-3">
-                <button
-                  type="button"
-                  onClick={() => setLearnersSubTab('groups')}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
-                    learnersSubTab === 'groups'
-                      ? 'bg-red-700 text-white shadow-md'
-                      : 'bg-neutral-950 text-neutral-400 hover:text-white border border-neutral-800'
-                  }`}
-                >
-                  <UsersRound className="w-4 h-4" />
-                  <span>Teams &amp; Groups ({(groups || []).length})</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setLearnersSubTab('students')}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
-                    learnersSubTab === 'students'
-                      ? 'bg-red-700 text-white shadow-md'
-                      : 'bg-neutral-950 text-neutral-400 hover:text-white border border-neutral-800'
-                  }`}
-                >
-                  <GraduationCap className="w-4 h-4" />
-                  <span>Learners Directory ({(students || []).length})</span>
-                </button>
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-neutral-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setLearnersSubTab('groups')}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+                      learnersSubTab === 'groups'
+                        ? 'bg-red-700 text-white shadow-md'
+                        : 'bg-neutral-950 text-neutral-400 hover:text-white border border-neutral-800'
+                    }`}
+                  >
+                    <UsersRound className="w-4 h-4" />
+                    <span>Teams &amp; Groups ({(groups || []).length})</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setLearnersSubTab('students')}
+                    className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer ${
+                      learnersSubTab === 'students'
+                        ? 'bg-red-700 text-white shadow-md'
+                        : 'bg-neutral-950 text-neutral-400 hover:text-white border border-neutral-800'
+                    }`}
+                  >
+                    <GraduationCap className="w-4 h-4" />
+                    <span>Learners Directory ({(students || []).length})</span>
+                  </button>
+                </div>
+
+                {learnersSubTab === 'students' && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    {archivedStudents.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowArchivedLearners((prev) => !prev)}
+                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold flex items-center gap-1.5 border transition-colors cursor-pointer ${
+                          showArchivedLearners
+                            ? 'bg-amber-950/70 border-amber-700 text-amber-200'
+                            : 'bg-neutral-950 hover:bg-neutral-900 border-neutral-800 text-neutral-300'
+                        }`}
+                      >
+                        <Archive className="w-3.5 h-3.5 text-amber-400" />
+                        <span>
+                          {showArchivedLearners
+                            ? `Viewing Archived (${archivedStudents.length})`
+                            : `Archived (${archivedStudents.length})`}
+                        </span>
+                      </button>
+                    )}
+
+                    <button
+                      type="button"
+                      disabled={students.length === 0}
+                      onClick={() => setShowClearLearnersConfirm(true)}
+                      title="Clear active learner directory without deleting records or allocated points"
+                      className="px-3 py-1.5 rounded-xl bg-amber-950/50 hover:bg-amber-900/60 disabled:opacity-40 disabled:cursor-not-allowed border border-amber-700/60 text-amber-200 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-colors"
+                    >
+                      <Archive className="w-3.5 h-3.5 text-amber-400" />
+                      <span>Clear Directory</span>
+                    </button>
+                  </div>
+                )}
               </div>
 
               {/* SUB-TAB A: TEAMS & GROUPS */}
@@ -3021,7 +3114,7 @@ export const TeacherPortalDashboard: React.FC = () => {
                           const linkedComp = grp.competitionId
                             ? competitions.find((c) => c.id === grp.competitionId)
                             : null;
-                          const members = (students || []).filter((s) => grp.studentIds.includes(s.id));
+                          const members = (allStudents || []).filter((s) => grp.studentIds.includes(s.id));
 
                           return (
                             <div
@@ -3142,6 +3235,41 @@ export const TeacherPortalDashboard: React.FC = () => {
               {/* SUB-TAB B: LEARNERS DIRECTORY */}
               {learnersSubTab === 'students' && (
                 <div className="space-y-4">
+                  {/* Info Banner when viewing Archived vs Active */}
+                  {showArchivedLearners && (
+                    <div className="p-3.5 rounded-xl bg-amber-950/30 border border-amber-800/50 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                      <div className="space-y-0.5">
+                        <div className="text-xs font-bold text-amber-200 flex items-center gap-1.5">
+                          <Archive className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Archived Learner Directory ({archivedStudents.length})</span>
+                        </div>
+                        <p className="text-[11px] text-amber-200/80">
+                          Cleared learners are safely kept here without losing any points allocated to them. Restore individual learners or bring the whole list back anytime.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
+                        {archivedStudents.length > 0 && (
+                          <button
+                            type="button"
+                            disabled={isRestoringLearners}
+                            onClick={handleRestoreAllArchived}
+                            className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <ArchiveRestore className="w-3.5 h-3.5" />
+                            <span>{isRestoringLearners ? 'Restoring...' : 'Restore All'}</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => setShowArchivedLearners(false)}
+                          className="px-3 py-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-200 text-xs font-semibold cursor-pointer"
+                        >
+                          Back to Active
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Filters */}
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="relative">
@@ -3183,7 +3311,8 @@ export const TeacherPortalDashboard: React.FC = () => {
                   </div>
 
                   {(() => {
-                    const filteredLearners = (students || []).filter((s) => {
+                    const sourceList = showArchivedLearners ? archivedStudents : students;
+                    const filteredLearners = (sourceList || []).filter((s) => {
                       if (learnerDirHouseFilter !== 'all' && s.houseId !== learnerDirHouseFilter) return false;
                       if (learnerDirYearFilter !== 'all' && s.yearLevel !== learnerDirYearFilter) return false;
                       if (learnerDirSearch.trim()) {
@@ -3200,34 +3329,56 @@ export const TeacherPortalDashboard: React.FC = () => {
                         <div className="p-10 rounded-2xl bg-neutral-950/70 border border-dashed border-neutral-800 text-center space-y-3">
                           <GraduationCap className="w-8 h-8 text-neutral-600 mx-auto" />
                           <div className="space-y-1">
-                            <p className="text-sm font-bold text-neutral-200">No Learners Match Filters</p>
-                            <p className="text-xs text-neutral-400">
-                              Add individual learners or bulk import your school roll.
+                            <p className="text-sm font-bold text-neutral-200">
+                              {showArchivedLearners
+                                ? 'No Archived Learners'
+                                : students.length === 0
+                                ? 'Active Learner Directory Is Cleared'
+                                : 'No Learners Match Filters'}
+                            </p>
+                            <p className="text-xs text-neutral-400 max-w-md mx-auto">
+                              {showArchivedLearners
+                                ? 'There are no archived learners matching your current filters.'
+                                : students.length === 0
+                                ? 'Add or bulk import your updated learner roll anytime. Previously allocated points remain safely in the ledger.'
+                                : 'Add individual learners or bulk import your school roll.'}
                             </p>
                           </div>
-                          <div className="flex items-center justify-center gap-2">
-                            <button
-                              type="button"
-                              onClick={() => openCreateLearnerModal(selectedHouse, false)}
-                              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-700 hover:bg-red-600 text-white text-xs font-bold cursor-pointer"
-                            >
-                              <UserPlus className="w-4 h-4" />
-                              <span>Add Learner</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setBulkLearnersHouseId(selectedHouse);
-                                setBulkLearnersText('');
-                                setBulkLearnersError(null);
-                                setShowBulkLearnersModal(true);
-                              }}
-                              className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-semibold cursor-pointer"
-                            >
-                              <Upload className="w-4 h-4" />
-                              <span>Bulk Import</span>
-                            </button>
-                          </div>
+                          {!showArchivedLearners && (
+                            <div className="flex flex-wrap items-center justify-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => openCreateLearnerModal(selectedHouse, false)}
+                                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-red-700 hover:bg-red-600 text-white text-xs font-bold cursor-pointer"
+                              >
+                                <UserPlus className="w-4 h-4" />
+                                <span>Add Learner</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setBulkLearnersHouseId(selectedHouse);
+                                  setBulkLearnersText('');
+                                  setBulkLearnersError(null);
+                                  setShowBulkLearnersModal(true);
+                                }}
+                                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-semibold cursor-pointer"
+                              >
+                                <Upload className="w-4 h-4" />
+                                <span>Bulk Import</span>
+                              </button>
+                              {archivedStudents.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => setShowArchivedLearners(true)}
+                                  className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-amber-950/60 hover:bg-amber-900/70 border border-amber-700/60 text-amber-200 text-xs font-semibold cursor-pointer"
+                                >
+                                  <ArchiveRestore className="w-4 h-4 text-amber-400" />
+                                  <span>View Archived ({archivedStudents.length})</span>
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </div>
                       );
                     }
@@ -3239,7 +3390,11 @@ export const TeacherPortalDashboard: React.FC = () => {
                           return (
                             <div
                               key={s.id}
-                              className="p-3 rounded-xl bg-neutral-950/80 border border-neutral-800 hover:border-neutral-700 flex items-center justify-between gap-2"
+                              className={`p-3 rounded-xl border flex items-center justify-between gap-2 ${
+                                showArchivedLearners
+                                  ? 'bg-neutral-950/50 border-amber-900/40'
+                                  : 'bg-neutral-950/80 border-neutral-800 hover:border-neutral-700'
+                              }`}
                             >
                               <div className="min-w-0 space-y-1">
                                 <div className="font-bold text-xs text-white truncate">{s.name}</div>
@@ -3257,22 +3412,37 @@ export const TeacherPortalDashboard: React.FC = () => {
                                 </div>
                               </div>
                               <div className="flex items-center gap-1 shrink-0">
-                                <button
-                                  type="button"
-                                  onClick={() => openEditLearnerModal(s)}
-                                  title="Edit learner"
-                                  className="p-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-blue-300 cursor-pointer"
-                                >
-                                  <Pencil className="w-3 h-3" />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setLearnerToDelete(s)}
-                                  title="Remove learner"
-                                  className="p-1.5 rounded-lg bg-neutral-900 hover:bg-red-950 border border-neutral-800 hover:border-red-800 text-red-400 cursor-pointer"
-                                >
-                                  <Trash2 className="w-3 h-3" />
-                                </button>
+                                {showArchivedLearners ? (
+                                  <button
+                                    type="button"
+                                    disabled={isRestoringLearners}
+                                    onClick={() => handleRestoreSingleLearner(s)}
+                                    title="Restore to active directory"
+                                    className="px-2 py-1 rounded-lg bg-emerald-950/70 hover:bg-emerald-900 border border-emerald-700/60 text-emerald-300 text-[10px] font-bold flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                                  >
+                                    <ArchiveRestore className="w-3 h-3" />
+                                    <span>Restore</span>
+                                  </button>
+                                ) : (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => openEditLearnerModal(s)}
+                                      title="Edit learner"
+                                      className="p-1.5 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 text-blue-300 cursor-pointer"
+                                    >
+                                      <Pencil className="w-3 h-3" />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setLearnerToDelete(s)}
+                                      title="Remove learner"
+                                      className="p-1.5 rounded-lg bg-neutral-900 hover:bg-red-950 border border-neutral-800 hover:border-red-800 text-red-400 cursor-pointer"
+                                    >
+                                      <Trash2 className="w-3 h-3" />
+                                    </button>
+                                  </>
+                                )}
                               </div>
                             </div>
                           );
@@ -5101,6 +5271,62 @@ export const TeacherPortalDashboard: React.FC = () => {
                   <span>{isImportingLearners ? 'Importing...' : 'Import Learners'}</span>
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal 6: Confirm Clear Learner Directory (Non-Destructive Archive) */}
+      {showClearLearnersConfirm && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-neutral-900 border border-neutral-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
+              <div className="flex items-center gap-2 text-amber-400">
+                <Archive className="w-4 h-4" />
+                <h3 className="font-bold text-base text-white">Clear Active Learner Directory</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => !isClearingLearners && setShowClearLearnersConfirm(false)}
+                disabled={isClearingLearners}
+                className="text-neutral-400 hover:text-white text-xs p-1 rounded-lg bg-neutral-800 cursor-pointer disabled:opacity-50"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 text-xs">
+              <p className="text-neutral-300 leading-relaxed">
+                This will move all <strong className="text-white">{students.length} active learners</strong> out of the active directory so you can upload or add an updated learner list.
+              </p>
+              <div className="p-3 bg-emerald-950/30 rounded-xl border border-emerald-800/40 text-emerald-200 space-y-1">
+                <p className="font-bold text-xs">Safe, Non-Destructive Action:</p>
+                <ul className="list-disc list-inside space-y-0.5 text-[11px] text-emerald-200/90">
+                  <li>Learner records are <strong>archived, not deleted</strong>, and can be restored anytime.</li>
+                  <li>All points allocated to learners and house totals remain <strong>100% intact</strong>.</li>
+                  <li>Existing competition teams and groups keep their history.</li>
+                </ul>
+              </div>
+            </div>
+
+            <div className="pt-2 flex justify-end gap-2 text-xs">
+              <button
+                type="button"
+                disabled={isClearingLearners}
+                onClick={() => setShowClearLearnersConfirm(false)}
+                className="px-3.5 py-2 rounded-lg bg-neutral-800 text-neutral-300 hover:text-white cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isClearingLearners}
+                onClick={handleConfirmClearDirectory}
+                className="px-4 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white font-bold cursor-pointer transition-colors shadow-sm flex items-center gap-1.5 disabled:opacity-50"
+              >
+                <Archive className="w-3.5 h-3.5" />
+                <span>{isClearingLearners ? 'Clearing...' : 'Yes, Clear Directory'}</span>
+              </button>
             </div>
           </div>
         </div>

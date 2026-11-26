@@ -124,7 +124,7 @@ export const TeacherPortalDashboard: React.FC = () => {
   const [customPoints, setCustomPoints] = useState<string>('100');
   const [scoreSignMode, setScoreSignMode] = useState<'award' | 'deduct'>('award');
   const [adminCustomInput, setAdminCustomInput] = useState<string>('');
-  const [eventTitle, setEventTitle] = useState('');
+  const [selectedScoreLabel, setSelectedScoreLabel] = useState<string | undefined>(undefined);
   const [category, setCategory] = useState<PointCategory>('Sports & Athletics');
   const [term, setTerm] = useState<'Term 1' | 'Term 2' | 'Term 3' | 'Term 4'>('Term 1');
   const [notes, setNotes] = useState('');
@@ -216,10 +216,10 @@ export const TeacherPortalDashboard: React.FC = () => {
       setSelectedStudentIds([]);
 
       // If current pointsValue (by magnitude) is not in the allowed scores of this competition, pick the first allowed score
-      const hasAllowed = activeCompetition.allowedScores.some(
+      const matched = activeCompetition.allowedScores.find(
         (s) => s.points === pointsValue || (scoreSignMode === 'deduct' && -Math.abs(s.points) === pointsValue)
       );
-      if (!hasAllowed && activeCompetition.allowedScores.length > 0) {
+      if (!matched && activeCompetition.allowedScores.length > 0) {
         const firstScore = activeCompetition.allowedScores[0];
         const nextVal =
           firstScore.points < 0
@@ -229,10 +229,9 @@ export const TeacherPortalDashboard: React.FC = () => {
             : firstScore.points;
         setPointsValue(nextVal);
         setCustomPoints(nextVal.toString());
-        if (!eventTitle.trim()) {
-          const labelSuffix = firstScore.label ? ` · ${firstScore.label}` : '';
-          setEventTitle(`${activeCompetition.name}${labelSuffix}`);
-        }
+        setSelectedScoreLabel(firstScore.label);
+      } else if (matched) {
+        setSelectedScoreLabel(matched.label);
       }
     }
   }, [activeCompetition]);
@@ -633,11 +632,7 @@ export const TeacherPortalDashboard: React.FC = () => {
         : score.points;
     setPointsValue(resolvedPoints);
     setCustomPoints(resolvedPoints.toString());
-    if (activeCompetition) {
-      const labelSuffix = score.label ? ` · ${score.label}` : '';
-      const prefix = resolvedPoints < 0 ? 'Deduction: ' : '';
-      setEventTitle(`${prefix}${activeCompetition.name}${labelSuffix}`);
-    }
+    setSelectedScoreLabel(score.label);
   };
 
   const handleSwitchScoreSignMode = (mode: 'award' | 'deduct') => {
@@ -662,6 +657,7 @@ export const TeacherPortalDashboard: React.FC = () => {
   const [newTeacherName, setNewTeacherName] = useState('');
   const [newTeacherEmail, setNewTeacherEmail] = useState('');
   const [newTeacherRole, setNewTeacherRole] = useState('GBHS Staff');
+  const [newTeacherIsAdmin, setNewTeacherIsAdmin] = useState(false);
   const [pasteText, setPasteText] = useState('');
   const [importMode, setImportMode] = useState<'single' | 'paste'>('single');
   const [rosterNotice, setRosterNotice] = useState<string | null>(null);
@@ -671,6 +667,11 @@ export const TeacherPortalDashboard: React.FC = () => {
   const [editingTeacher, setEditingTeacher] = useState<TeacherAccount | null>(null);
   const [editName, setEditName] = useState('');
   const [editRole, setEditRole] = useState('');
+  const [editIsAdmin, setEditIsAdmin] = useState(false);
+
+  // Admin Promotion / Demotion Confirmation Modal State
+  const [teacherAdminToggleTarget, setTeacherAdminToggleTarget] = useState<TeacherAccount | null>(null);
+  const [isTogglingTeacherAdmin, setIsTogglingTeacherAdmin] = useState(false);
 
   // Delete Teacher Modal State
   const [teacherToDelete, setTeacherToDelete] = useState<TeacherAccount | null>(null);
@@ -912,17 +913,6 @@ export const TeacherPortalDashboard: React.FC = () => {
     }
   };
 
-  const quickEventTitles = [
-    'Inter-House Athletics 100m Sprint',
-    'Inter-House Swimming 50m Freestyle',
-    'Inter-House Haka Competition Award',
-    'Cross Country Senior Team Points',
-    'Academic Quiz & Science Bowl',
-    'Weekly Tutor Attendance & Merits',
-    'House Spirit & Tug-of-War Trophy',
-    'Debating & Public Speaking Round',
-  ];
-
   const handleAdminCustomPointsApply = () => {
     const parsed = parseInt(adminCustomInput.trim(), 10);
     if (isNaN(parsed) || parsed === 0 || parsed < -1000 || parsed > 1000) {
@@ -933,15 +923,12 @@ export const TeacherPortalDashboard: React.FC = () => {
     setPointsValue(parsed);
     setCustomPoints(parsed.toString());
     setScoreSignMode(parsed < 0 ? 'deduct' : 'award');
+    setSelectedScoreLabel('Admin Adjustment');
   };
 
   const handleSubmitPoints = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitError(null);
-    if (!eventTitle.trim()) {
-      setSubmitError('Please enter an event, achievement, or penalty reason.');
-      return;
-    }
     if (pointsValue === 0 || pointsValue < -1000 || pointsValue > 1000 || isNaN(pointsValue)) {
       setSubmitError('Points must be a non-zero value between -1000 and 1000.');
       return;
@@ -961,10 +948,29 @@ export const TeacherPortalDashboard: React.FC = () => {
         ? selectedGroupMembers.map((m) => m.name)
         : selectedStudentNames;
 
+      const matchedTier = activeCompetition?.allowedScores?.find((s) => {
+        const effective =
+          s.points < 0
+            ? s.points
+            : scoreSignMode === 'deduct'
+            ? -Math.abs(s.points)
+            : s.points;
+        return effective === pointsValue;
+      });
+      const tierLabel = selectedScoreLabel ?? matchedTier?.label;
+      const labelSuffix = tierLabel ? ` · ${tierLabel}` : '';
+      const prefix = pointsValue < 0 ? 'Deduction: ' : '';
+      const rawTitle = activeCompetition
+        ? `${prefix}${activeCompetition.name}${labelSuffix}`
+        : pointsValue < 0
+        ? 'House Points Deduction'
+        : 'House Competition Points';
+      const generatedTitle = rawTitle.slice(0, 300);
+
       await addPoints({
         houseId: selectedHouse,
         points: pointsValue,
-        title: eventTitle.trim(),
+        title: generatedTitle,
         category: activeCat,
         term: activeTerm,
         awardedBy: teacherUser?.name || 'GBHS Staff',
@@ -977,7 +983,6 @@ export const TeacherPortalDashboard: React.FC = () => {
 
       setLastSubmittedPoints(pointsValue);
       setSubmitSuccess(true);
-      setEventTitle('');
       setNotes('');
       setSelectedStudentIds([]);
       setSelectedGroupId(null);
@@ -1896,37 +1901,10 @@ export const TeacherPortalDashboard: React.FC = () => {
                   </div>
                 </div>
 
-                {/* 4. EVENT TITLE / ACHIEVEMENT REASON */}
-                <div>
-                  <label className="block text-xs font-bold uppercase tracking-wider text-neutral-400 mb-1.5">
-                    4. Event / Achievement Reason
-                  </label>
-                  <input
-                    type="text"
-                    value={eventTitle}
-                    onChange={(e) => setEventTitle(e.target.value)}
-                    required
-                    placeholder="e.g. Senior 100m Athletics Relay (1st Place)"
-                    className="w-full bg-neutral-950 border border-neutral-800 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-red-600"
-                  />
-                  <div className="mt-2 flex flex-wrap gap-1.5">
-                    {quickEventTitles.map((title) => (
-                      <button
-                        key={title}
-                        type="button"
-                        onClick={() => setEventTitle(title)}
-                        className="text-[10px] px-2 py-0.5 rounded bg-neutral-950 text-neutral-400 hover:text-neutral-200 border border-neutral-800 hover:border-neutral-700 transition-colors cursor-pointer"
-                      >
-                        + {title}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* 5. ADDITIONAL NOTES */}
+                {/* 4. ADDITIONAL NOTES */}
                 <div>
                   <label className="block text-xs font-semibold text-neutral-400 mb-1">
-                    5. Additional Notes / Details (Optional)
+                    4. Additional Notes / Details (Optional)
                   </label>
                   <input
                     type="text"
@@ -2468,12 +2446,51 @@ export const TeacherPortalDashboard: React.FC = () => {
                       
                       {isSuperAdmin && (
                         <>
+                          {/* Promote to Admin / Revoke Admin Toggle Button */}
+                          {t.email.toLowerCase().trim() === 'hermanf@gisboyshigh.net' ? (
+                            <span
+                              className="px-2 py-1 rounded-lg bg-neutral-900 border border-neutral-800 text-[10px] font-mono text-amber-400/90 hidden md:inline-flex items-center gap-1"
+                              title="Primary School Administrator"
+                            >
+                              <ShieldCheck className="w-3 h-3" />
+                              <span>Primary</span>
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => setTeacherAdminToggleTarget(t)}
+                              className={`px-2.5 py-1.5 rounded-lg border text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer ${
+                                t.isSuperAdmin
+                                  ? 'bg-amber-950/60 hover:bg-amber-900/70 border-amber-700/70 text-amber-300'
+                                  : 'bg-neutral-900 hover:bg-red-950/70 border-neutral-700 hover:border-red-700/70 text-neutral-300 hover:text-red-200'
+                              }`}
+                              title={
+                                t.isSuperAdmin
+                                  ? `Revoke Admin privileges from ${t.name}`
+                                  : `Promote ${t.name} to Admin`
+                              }
+                            >
+                              {t.isSuperAdmin ? (
+                                <>
+                                  <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+                                  <span className="hidden sm:inline">Remove Admin</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Shield className="w-3.5 h-3.5 text-red-400" />
+                                  <span className="hidden sm:inline">Make Admin</span>
+                                </>
+                              )}
+                            </button>
+                          )}
+
                           {/* Modify / Edit Button */}
                           <button
                             onClick={() => {
                               setEditingTeacher(t);
                               setEditName(t.name);
                               setEditRole(t.role);
+                              setEditIsAdmin(!!t.isSuperAdmin || t.email.toLowerCase().trim() === 'hermanf@gisboyshigh.net');
                             }}
                             className="p-2 rounded-lg bg-neutral-900 hover:bg-neutral-800 border border-neutral-800 hover:border-neutral-700 text-neutral-300 hover:text-white transition-colors cursor-pointer"
                             title={`Modify details for ${t.name}`}
@@ -2577,11 +2594,14 @@ export const TeacherPortalDashboard: React.FC = () => {
                           name: newTeacherName.trim() || newTeacherEmail.split('@')[0],
                           email: newTeacherEmail.trim().toLowerCase(),
                           role: newTeacherRole.trim() || 'GBHS Staff',
-                          isSuperAdmin: newTeacherEmail.trim().toLowerCase() === 'hermanf@gisboyshigh.net',
+                          isSuperAdmin:
+                            newTeacherEmail.trim().toLowerCase() === 'hermanf@gisboyshigh.net' ||
+                            newTeacherIsAdmin,
                         });
                         setRosterNotice(`Added ${newTeacherName.trim() || newTeacherEmail.trim()} to the Cloud Firestore database.`);
                         setNewTeacherName('');
                         setNewTeacherEmail('');
+                        setNewTeacherIsAdmin(false);
                         setAddTeacherError(null);
                         setShowAddTeacherModal(false);
                       }}
@@ -2634,11 +2654,30 @@ export const TeacherPortalDashboard: React.FC = () => {
                         />
                       </div>
 
+                      <label className="flex items-start gap-2.5 p-3 rounded-xl bg-neutral-950 border border-neutral-800 hover:border-neutral-700 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={newTeacherIsAdmin}
+                          onChange={(e) => setNewTeacherIsAdmin(e.target.checked)}
+                          className="mt-0.5 accent-red-600 cursor-pointer"
+                        />
+                        <div className="space-y-0.5">
+                          <span className="font-bold text-white flex items-center gap-1.5">
+                            <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+                            <span>Grant Administrator Privileges</span>
+                          </span>
+                          <span className="block text-[11px] text-neutral-400">
+                            Allows managing competitions, score defaults, staff directory, and ledger edits.
+                          </span>
+                        </div>
+                      </label>
+
                       <div className="pt-2 flex justify-end gap-2">
                         <button
                           type="button"
                           onClick={() => {
                             setShowAddTeacherModal(false);
+                            setNewTeacherIsAdmin(false);
                             setAddTeacherError(null);
                           }}
                           className="px-3.5 py-2 rounded-lg bg-neutral-800 text-neutral-300 hover:text-white cursor-pointer"
@@ -2740,9 +2779,11 @@ export const TeacherPortalDashboard: React.FC = () => {
                         return;
                       }
                       try {
+                        const isPrimary = editingTeacher.email.toLowerCase().trim() === 'hermanf@gisboyshigh.net';
                         await editAuthorizedTeacher(editingTeacher.email, {
                           name: editName.trim(),
                           role: editRole.trim() || 'GBHS Staff',
+                          isSuperAdmin: isPrimary ? true : editIsAdmin,
                         });
                         setRosterNotice(`Updated details for ${editName.trim()} in Cloud Firestore.`);
                         setEditingTeacher(null);
@@ -2792,6 +2833,33 @@ export const TeacherPortalDashboard: React.FC = () => {
                         placeholder="e.g. Tangaroa House Dean"
                         className="w-full px-3 py-2 bg-neutral-950 border border-neutral-800 focus:border-red-500 focus:outline-none rounded-lg text-white"
                       />
+                    </div>
+
+                    <div className="p-3 rounded-xl bg-neutral-950 border border-neutral-800 space-y-1.5">
+                      <label className="flex items-start gap-2.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          disabled={editingTeacher.email.toLowerCase().trim() === 'hermanf@gisboyshigh.net'}
+                          checked={
+                            editingTeacher.email.toLowerCase().trim() === 'hermanf@gisboyshigh.net'
+                              ? true
+                              : editIsAdmin
+                          }
+                          onChange={(e) => setEditIsAdmin(e.target.checked)}
+                          className="mt-0.5 accent-red-600 cursor-pointer disabled:opacity-60"
+                        />
+                        <div className="space-y-0.5">
+                          <span className="font-bold text-white flex items-center gap-1.5">
+                            <ShieldCheck className="w-3.5 h-3.5 text-amber-400" />
+                            <span>Administrator Privileges</span>
+                          </span>
+                          <span className="block text-[11px] text-neutral-400">
+                            {editingTeacher.email.toLowerCase().trim() === 'hermanf@gisboyshigh.net'
+                              ? 'Primary School Administrator account always retains Admin privileges.'
+                              : 'Grants full access to Competition Controls, custom score adjustments, ledger deletions, and Staff Directory management.'}
+                          </span>
+                        </div>
+                      </label>
                     </div>
 
                     <div className="pt-2 flex justify-end gap-2">
@@ -2883,6 +2951,108 @@ export const TeacherPortalDashboard: React.FC = () => {
                           <span>Confirm Remove</span>
                         </>
                       )}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Modal for Promoting / Demoting Teacher Admin Privileges */}
+            {teacherAdminToggleTarget && isSuperAdmin && (
+              <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+                <div className="bg-neutral-900 border border-neutral-800 rounded-2xl max-w-md w-full p-6 shadow-2xl space-y-4">
+                  <div className="flex items-center justify-between pb-3 border-b border-neutral-800">
+                    <div className="flex items-center gap-2 text-amber-400">
+                      <ShieldCheck className="w-4 h-4" />
+                      <h3 className="font-bold text-base text-white">
+                        {teacherAdminToggleTarget.isSuperAdmin
+                          ? 'Revoke Admin Privileges'
+                          : 'Promote Teacher to Admin'}
+                      </h3>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => !isTogglingTeacherAdmin && setTeacherAdminToggleTarget(null)}
+                      disabled={isTogglingTeacherAdmin}
+                      className="text-neutral-400 hover:text-white text-xs p-1 rounded-lg bg-neutral-800 cursor-pointer disabled:opacity-50"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <div className="space-y-3 text-xs">
+                    <p className="text-neutral-300 leading-relaxed">
+                      {teacherAdminToggleTarget.isSuperAdmin ? (
+                        <>
+                          Change <strong className="text-white">{teacherAdminToggleTarget.name}</strong> back to a standard Teacher account? They will still be able to sign in and award competition points.
+                        </>
+                      ) : (
+                        <>
+                          Promote <strong className="text-white">{teacherAdminToggleTarget.name}</strong> to an <strong className="text-amber-300">Administrator</strong>?
+                        </>
+                      )}
+                    </p>
+                    <div className="p-3 bg-neutral-950 rounded-xl border border-neutral-800 space-y-1 font-mono text-[11px]">
+                      <div className="text-neutral-400">Email: <span className="text-neutral-200">{teacherAdminToggleTarget.email}</span></div>
+                      <div className="text-neutral-400">Role: <span className="text-neutral-200">{teacherAdminToggleTarget.role}</span></div>
+                    </div>
+                    {!teacherAdminToggleTarget.isSuperAdmin && (
+                      <div className="p-3 bg-amber-950/30 rounded-xl border border-amber-800/40 text-amber-200 space-y-1">
+                        <p className="font-bold text-xs">Admin Access Includes:</p>
+                        <ul className="list-disc list-inside space-y-0.5 text-[11px] text-amber-200/90">
+                          <li>Managing Competition Controls, default score tiers &amp; ordering</li>
+                          <li>Adding, editing, promoting, or removing staff accounts</li>
+                          <li>Deleting ledger entries and resetting term or year scores</li>
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="pt-2 flex justify-end gap-2 text-xs">
+                    <button
+                      type="button"
+                      disabled={isTogglingTeacherAdmin}
+                      onClick={() => setTeacherAdminToggleTarget(null)}
+                      className="px-3.5 py-2 rounded-lg bg-neutral-800 text-neutral-300 hover:text-white cursor-pointer disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      type="button"
+                      disabled={isTogglingTeacherAdmin}
+                      onClick={async () => {
+                        setIsTogglingTeacherAdmin(true);
+                        const nextAdmin = !teacherAdminToggleTarget.isSuperAdmin;
+                        try {
+                          await editAuthorizedTeacher(teacherAdminToggleTarget.email, {
+                            isSuperAdmin: nextAdmin,
+                          });
+                          setRosterNotice(
+                            nextAdmin
+                              ? `${teacherAdminToggleTarget.name} has been promoted to Administrator.`
+                              : `${teacherAdminToggleTarget.name} has been changed back to standard Teacher access.`
+                          );
+                          setTeacherAdminToggleTarget(null);
+                        } catch (err: any) {
+                          setRosterNotice(`Failed to update admin role: ${err?.message || 'Error'}`);
+                        } finally {
+                          setIsTogglingTeacherAdmin(false);
+                        }
+                      }}
+                      className={`px-4 py-2 rounded-lg text-white font-bold cursor-pointer transition-colors shadow-sm flex items-center gap-1.5 disabled:opacity-50 ${
+                        teacherAdminToggleTarget.isSuperAdmin
+                          ? 'bg-neutral-700 hover:bg-neutral-600'
+                          : 'bg-red-700 hover:bg-red-600'
+                      }`}
+                    >
+                      <ShieldCheck className="w-3.5 h-3.5" />
+                      <span>
+                        {isTogglingTeacherAdmin
+                          ? 'Updating...'
+                          : teacherAdminToggleTarget.isSuperAdmin
+                          ? 'Confirm Remove Admin'
+                          : 'Confirm Make Admin'}
+                      </span>
                     </button>
                   </div>
                 </div>
@@ -3466,7 +3636,7 @@ export const TeacherPortalDashboard: React.FC = () => {
                 </div>
                 <h3 className="text-lg font-bold text-white">Administrator Restricted Area</h3>
                 <p className="text-xs text-neutral-400 max-w-md mx-auto leading-relaxed">
-                  Competition ordering, default allowed scores, and championship reset controls are restricted to the Super Administrator (<span className="text-neutral-200 font-mono">hermanf@gisboyshigh.net</span>).
+                  Competition ordering, default allowed scores, and championship reset controls are restricted to School Administrators.
                 </p>
                 <button
                   type="button"

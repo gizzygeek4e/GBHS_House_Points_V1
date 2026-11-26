@@ -16,11 +16,27 @@ service cloud.firestore {
       return request.auth != null;
     }
 
-    function isAdmin() {
+    function teacherDocIdForEmail(email) {
+      return email.lower().replace('[^a-zA-Z0-9_-]', '_');
+    }
+
+    function isPrimaryAdmin() {
       return request.auth != null
         && request.auth.token.email_verified == true
         && request.auth.token.email != null
         && request.auth.token.email.matches('(?i)^hermanf@gisboyshigh\\.net$');
+    }
+
+    function isPromotedAdmin() {
+      return request.auth != null
+        && request.auth.token.email_verified == true
+        && request.auth.token.email != null
+        && exists(/databases/$(database)/documents/authorizedTeachers/$(teacherDocIdForEmail(request.auth.token.email)))
+        && get(/databases/$(database)/documents/authorizedTeachers/$(teacherDocIdForEmail(request.auth.token.email))).data.isSuperAdmin == true;
+    }
+
+    function isAdmin() {
+      return isPrimaryAdmin() || isPromotedAdmin();
     }
 
     function isValidHouseId(houseId) {
@@ -130,8 +146,13 @@ service cloud.firestore {
     // Adding, modifying, or removing staff members is strictly restricted to Admin (Herman F.).
     match /authorizedTeachers/{teacherId} {
       allow read: if true;
-      allow create, update: if isValidTeacherId(teacherId) && isAdmin() && isValidAuthorizedTeacher(request.resource.data);
-      allow delete: if isValidTeacherId(teacherId) && isAdmin();
+      allow create, update: if isValidTeacherId(teacherId)
+        && isAdmin()
+        && isValidAuthorizedTeacher(request.resource.data)
+        && (request.resource.data.email.lower() != 'hermanf@gisboyshigh.net' || request.resource.data.isSuperAdmin == true);
+      allow delete: if isValidTeacherId(teacherId)
+        && isAdmin()
+        && resource.data.email.lower() != 'hermanf@gisboyshigh.net';
     }
 
     // Competitions Collection:

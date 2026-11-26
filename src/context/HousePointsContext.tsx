@@ -322,6 +322,17 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
             });
           });
           setAuthorizedTeachers(liveTeachers);
+          // Sync live admin promotion/demotion for the currently signed-in teacher
+          setTeacherUser((prev) => {
+            if (!prev) return prev;
+            const cleanPrevEmail = prev.email.toLowerCase().trim();
+            const isOwner = cleanPrevEmail === 'hermanf@gisboyshigh.net';
+            const match = liveTeachers.find((t) => t.email.toLowerCase().trim() === cleanPrevEmail);
+            if (!match && !isOwner) return prev;
+            const nextIsAdmin = isOwner || !!match?.isSuperAdmin;
+            if (nextIsAdmin === !!prev.isSuperAdmin) return prev;
+            return { ...prev, isSuperAdmin: nextIsAdmin };
+          });
         } else if (auth.currentUser) {
           // Pre-seed default teachers to Firestore when authenticated
           try {
@@ -559,16 +570,19 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     }
   }, [computedHouses, prevLeaderId, triggerConfetti]);
 
-  // Helper to verify if current user is SuperAdmin (Herman F.)
+  // Helper to verify if current user is an Admin (Primary Owner or Promoted Admin)
   const checkIsAdmin = (): boolean => {
     const email = (teacherUser?.email || auth.currentUser?.email || '').toLowerCase().trim();
-    return email === 'hermanf@gisboyshigh.net' || !!teacherUser?.isSuperAdmin;
+    if (!email) return false;
+    if (email === 'hermanf@gisboyshigh.net') return true;
+    if (teacherUser?.isSuperAdmin) return true;
+    return authorizedTeachers.some((t) => t.email.toLowerCase().trim() === email && !!t.isSuperAdmin);
   };
 
   // Update authorized teachers list in memory and sync to Firestore (Admin Only)
   const updateAuthorizedTeachers = async (newTeachers: TeacherAccount[]) => {
     if (!checkIsAdmin()) {
-      throw new Error('Unauthorized: Only Admin (hermanf@gisboyshigh.net) can modify staff accounts.');
+      throw new Error('Unauthorized: Only Admin accounts can modify staff accounts.');
     }
 
     setAuthorizedTeachers(newTeachers);
@@ -598,7 +612,7 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
   // Add single authorized teacher (Admin Only)
   const addAuthorizedTeacher = async (teacher: TeacherAccount) => {
     if (!checkIsAdmin()) {
-      throw new Error('Unauthorized: Only Admin (hermanf@gisboyshigh.net) can add staff accounts.');
+      throw new Error('Unauthorized: Only Admin accounts can add staff accounts.');
     }
 
     const cleanEmail = teacher.email.toLowerCase().trim();
@@ -613,29 +627,48 @@ export const HousePointsProvider: React.FC<{ children: React.ReactNode }> = ({ c
     await updateAuthorizedTeachers(updated);
   };
 
-  // Edit / Modify existing teacher details in Cloud Firestore (Admin Only)
+  // Edit / Modify existing teacher details & admin role in Cloud Firestore (Admin Only)
   const editAuthorizedTeacher = async (email: string, updated: Partial<TeacherAccount>) => {
     if (!checkIsAdmin()) {
-      throw new Error('Unauthorized: Only Admin (hermanf@gisboyshigh.net) can modify staff accounts.');
+      throw new Error('Unauthorized: Only Admin accounts can modify staff accounts.');
     }
 
     const cleanEmail = email.toLowerCase().trim();
-    const docId = cleanEmail.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const computedDocId = cleanEmail.replace(/[^a-zA-Z0-9_-]/g, '_');
+    const existingTeacher = authorizedTeachers.find((t) => t.email.toLowerCase().trim() === cleanEmail);
+
+    const resolvedIsAdmin =
+      cleanEmail === 'hermanf@gisboyshigh.net'
+        ? true
+        : updated.isSuperAdmin !== undefined
+        ? !!updated.isSuperAdmin
+        : !!existingTeacher?.isSuperAdmin;
+
+    const cleanPayload = {
+      email: cleanEmail,
+      name: (updated.name ?? existingTeacher?.name ?? cleanEmail.split('@')[0]).trim().slice(0, 150),
+      role: (updated.role ?? existingTeacher?.role ?? 'GBHS Staff').trim().slice(0, 150) || 'GBHS Staff',
+      isSuperAdmin: resolvedIsAdmin,
+      updatedAt: Date.now(),
+    };
 
     // Update state in memory
     const nextTeachers = authorizedTeachers.map((t) =>
-      t.email.toLowerCase() === cleanEmail ? { ...t, ...updated } : t
+      t.email.toLowerCase().trim() === cleanEmail
+        ? { ...t, ...cleanPayload, id: t.id || computedDocId }
+        : t
     );
     setAuthorizedTeachers(nextTeachers);
 
     try {
-      const docRef = doc(db, 'authorizedTeachers', docId);
-      await updateDoc(docRef, {
-        ...updated,
-        updatedAt: Date.now(),
-      });
+      // Always write canonical docId so Firestore security rules isPromotedAdmin() resolves it cleanly
+      await setDoc(doc(db, 'authorizedTeachers', computedDocId), cleanPayload, { merge: true });
+      if (existingTeacher?.id && existingTeacher.id !== computedDocId) {
+        await setDoc(doc(db, 'authorizedTeachers', existingTeacher.id), cleanPayload, { merge: true });
+      }
     } catch (err) {
       console.error('Error updating teacher in Firestore:', err);
+      handleFirestoreError(err, OperationType.UPDATE, `authorizedTeachers/${computedDocId}`);
       throw err;
     }
   };

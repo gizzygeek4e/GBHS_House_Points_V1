@@ -1,19 +1,47 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
-import { initializeFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import {
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  memoryLocalCache,
+  setLogLevel,
+  doc,
+  getDocFromServer,
+} from 'firebase/firestore';
 import firebaseConfig from '../../firebase-applet-config.json';
+
+// Suppress internal SDK transient offline/WebChannel retry console noise;
+// real permission and write errors are surfaced cleanly via handleFirestoreError.
+setLogLevel('silent');
 
 // Initialize Firebase App
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore with auto-detect long polling for reliable connectivity across mobile networks and proxies
-export const db = initializeFirestore(
-  app,
-  {
-    experimentalAutoDetectLongPolling: true,
-  },
-  firebaseConfig.firestoreDatabaseId
-);
+// Force HTTPS long polling for reliable connectivity across mobile networks, school firewalls, and proxies,
+// and enable multi-tab offline persistence with safe fallback to memory cache.
+let dbInstance;
+try {
+  dbInstance = initializeFirestore(
+    app,
+    {
+      experimentalForceLongPolling: true,
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }),
+    },
+    firebaseConfig.firestoreDatabaseId
+  );
+} catch {
+  dbInstance = initializeFirestore(
+    app,
+    {
+      experimentalForceLongPolling: true,
+      localCache: memoryLocalCache(),
+    },
+    firebaseConfig.firestoreDatabaseId
+  );
+}
+
+export const db = dbInstance;
 
 // Initialize Firebase Auth
 export const auth = getAuth(app);
